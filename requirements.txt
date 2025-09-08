@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+altair
+matplotlib
+requests
+feedparser
+yfinance
+python-dateutil
+requests
+pypdf
+python-docx

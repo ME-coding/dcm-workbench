@@ -1,0 +1,5 @@
+# Ignore everything in .streamlit (incl. secrets)
+.streamlit/*
+
+# …sauf le fichier de configuration (facultatif à versionner)
+!.streamlit/config.toml
