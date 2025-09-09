@@ -10,7 +10,7 @@
 #   python-docx
 
 from __future__ import annotations
-import os, re
+import os, re, time, random
 from html import escape
 from typing import Dict, List, Tuple
 
@@ -36,9 +36,9 @@ except Exception:
 
 # ---------------------------- Config ----------------------------
 MODEL_NAME = os.getenv("MISTRAL_MODEL", "mistral-large-latest")
-MAX_CONTEXT_CHARS = 6000     # total chars from uploaded docs (for chat)
+MAX_CONTEXT_CHARS = 2000     # total chars from uploaded docs (for chat)
 MAX_FILE_CHARS = 4000        # per-file cap to avoid huge payloads
-HISTORY_TURNS = 12           # number of prior messages to keep
+HISTORY_TURNS = 6           # number of prior messages to keep
 
 SYSTEM_PROMPT = """You are a helpful, concise AI assistant embedded in a Debt Capital Markets workspace.
 - Always answer clearly and directly.
@@ -151,16 +151,39 @@ def _call_mistral(messages: List[Dict[str, str]], api_key: str) -> str:
     if not api_key:
         return ("⚠️ Missing API key. Add `MISTRAL_API_KEY` to `.streamlit/secrets.toml` "
                 "or set the environment variable.")
+
+    # Permet d'overrider le modèle via secrets/env (sinon garde la constante)
+    model = st.secrets.get("MISTRAL_MODEL", os.getenv("MISTRAL_MODEL", MODEL_NAME))
+
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {"model": MODEL_NAME, "messages": messages}
-    try:
-        r = _requests.post(url, headers=headers, json=payload, timeout=60)
-        r.raise_for_status()
-        data = r.json()
-        return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"⚠️ API error: {e}"
+    payload = {"model": model, "messages": messages}
+
+    # Retry avec backoff (429/5xx)
+    max_retries = 4
+    base_delay = 1.5  # secondes
+
+    for attempt in range(max_retries + 1):
+        try:
+            r = _requests.post(url, headers=headers, json=payload, timeout=60)
+            if r.status_code == 429 or 500 <= r.status_code < 600:
+                # calcul d'un backoff exponentiel avec un petit jitter
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                    time.sleep(delay)
+                    continue
+            r.raise_for_status()
+            data = r.json()
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            # si dernière tentative, on remonte l'erreur, sinon on retente
+            if attempt == max_retries:
+                return f"⚠️ API error: {e}"
+            else:
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                time.sleep(delay)
+
+    return "⚠️ API error: exhausted retries."
 
 def _init_state():
     if "agent_messages" not in st.session_state:
@@ -225,7 +248,7 @@ def _ai_assist_summary(query: str, results: Dict[str, List[str]], api_key: str) 
         for s in ss[:3]:
             text_only = re.sub("<.*?>", "", s)  # strip HTML for the model
             flat.append((f, text_only))
-    flat = flat[:8]  # cap
+    flat = flat[:5]  # cap
     snippet_block = "\n".join([f"- [{f}] {t}" for f, t in flat])
     messages = [
         {"role": "system", "content": "You summarize only using the provided snippets. If unsure, say you cannot find it."},
