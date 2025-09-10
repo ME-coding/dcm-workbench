@@ -317,19 +317,18 @@ def render():
         with st.expander("Learn more — SLB vs. Green Bond"):
             _render_learn_more()
 
-# ------------------ Example PDF (Library) --------------------------------
-    st.markdown("### Example — Open")
+    # ------------------ Example PDF (Library) --------------------------------
+    st.markdown("### Example — Download")
     pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "SLB Example - Carrefour (2025).pdf"
 
     if pdf_path.exists():
-        st.markdown(
-            f"""
-            <a href="./Library/{pdf_path.name}" target="_blank">
-                📖 Open: SLB Example — Carrefour (2025) (PDF)
-            </a>
-            """,
-            unsafe_allow_html=True,
-        )
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                "Download: SLB Example — Carrefour (2025) (PDF)",
+                data=f.read(),
+                file_name=pdf_path.name,
+                mime="application/pdf",
+            )
     else:
         st.info(f"Place the case PDF at **{pdf_path}** (filename must match exactly).")
 

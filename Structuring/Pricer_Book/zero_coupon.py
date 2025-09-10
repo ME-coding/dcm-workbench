@@ -213,9 +213,11 @@ def render():
     # Monte Carlo (CIR) section
     # =========================================================
     st.markdown("### Monte Carlo (CIR) — Optional")
-    st.caption("Modélise le **short rate** via le processus **CIR(85)** et estime le prix ZCB comme "
-               "l’espérance du facteur d’actualisation :  \(B(0,T)=\\mathbb{E}[e^{-\int r_s ds}]\). "
-               "Utile pour visualiser le risque de structure par terme (pédagogique).")
+    st.caption(
+        "Simulates short-term interest rates with a random path model (CIR, 1985) and "
+        "estimates the zero-coupon bond price as the average of the simulated discount factors. "
+        "Useful for illustrating how interest rate movements affect bond values over time."
+    )
 
     with st.expander("Simulate short-rate (CIR) and estimate B(0,T)"):
         mc1, mc2, mc3, mc4 = st.columns(4)
@@ -309,20 +311,19 @@ def render():
             _render_learn_more()
 
     # Example PDF
-    st.markdown("### Example — Open")
+    st.markdown("### Example — Download")
     pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "Zero Coupon Notes Example - HSBC (2023).pdf"
-
     if pdf_path.exists():
-        st.markdown(
-            f"""
-            <a href="./Library/{pdf_path.name}" target="_blank">
-                📖 Open: Zero Coupon Notes — HSBC (2023) (PDF)
-            </a>
-            """,
-            unsafe_allow_html=True,
-        )
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                "Download: Zero Coupon Notes — HSBC (2023) (PDF)",
+                data=f.read(),
+                file_name=pdf_path.name,
+                mime="application/pdf",
+            )
     else:
         st.info(f"Place the example PDF at **{pdf_path}** (filename must match exactly).")
+
 
 def _render_learn_more():
     st.markdown(

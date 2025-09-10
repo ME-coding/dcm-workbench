@@ -223,17 +223,16 @@ def render():
 
     pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "Sukuk Bond Example - Indonesia (2023).pdf"
     if pdf_path.exists():
-        st.markdown(
-            f"""
-            <a href="./Library/{pdf_path.name}" target="_blank">
-                📖 Open: Sukuk Bond Example — Indonesia (2023) (PDF)
-            </a>
-            """,
-            unsafe_allow_html=True,
-        )
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                "Download: Sukuk Bond Example — Indonesia (2023) (PDF)",
+                data=f.read(),
+                file_name=pdf_path.name,
+                mime="application/pdf",
+            )
     else:
         st.info(
-            f"Place the example PDF at **{pdf_path}** to enable viewing. "
+            f"Place the example PDF at **{pdf_path}** to enable download. "
             "Filename must match exactly."
         )
 

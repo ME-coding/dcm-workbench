@@ -194,7 +194,7 @@ def _mistral_key() -> str:
     k = st.secrets.get("MISTRAL_API_KEY", "") if hasattr(st, "secrets") else ""
     return k or os.environ.get("MISTRAL_API_KEY", "") or ""
 
-def summarize_with_mistral(text: str, max_bullets: int = 6, temperature: float = 0.2) -> Optional[str]:
+def summarize_with_mistral(text: str, max_bullets: int = 8, temperature: float = 0.2) -> Optional[str]:
     """
     Improved: forces a compact, sectioned Markdown summary suitable for DCM users.
     Output sections (omit empty ones): Macroeconomics / Markets / Geopolitics & Policy / Primary & Corporate.
@@ -206,19 +206,18 @@ def summarize_with_mistral(text: str, max_bullets: int = 6, temperature: float =
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     prompt = (
-        "You are a financial news editor for a Debt Capital Markets workbench. "
+        "You are a financial news editor for a Global Markets journal. "
         "From the headlines below, produce a VERY concise Markdown summary with clear sections. "
         f"Use at most {max_bullets} bullets TOTAL across all sections. No intro or outro.\n\n"
         "Sections (omit if no signal):\n"
-        "1) **Macroeconomics** – growth/inflation data, policy guidance, fiscal updates, energy supply/demand shocks.\n"
-        "2) **Markets** – Rates/Credit/Equities/FX/Commodities: key moves, drivers, and liquidity/volatility notes.\n"
-        "3) **Geopolitics & Policy** – elections, conflicts, sanctions, trade/industrial policy with market impact.\n"
-        "4) **Primary & Corporate** – DCM/ECM/M&A, supply outlook (IG/HY/SSA), notable deals, funding costs.\n\n"
+        "1) *Macroeconomics* – growth/inflation data, policy guidance, fiscal updates, energy supply/demand shocks.\n"
+        "2) *Markets* – Rates/Credit/Equities/FX/Commodities: key moves, drivers, and liquidity/volatility notes.\n"
+        "3) *Geopolitics & Policy* – elections, conflicts, sanctions, trade/industrial policy with market impact.\n"
+        "4) *Primary & Corporate* – DCM/ECM/M&A, supply outlook (IG/HY/SSA), notable deals, funding costs.\n\n"
         "Rules:\n"
-        "- Be Europe-/EMEA-aware; don’t fixate on the Fed unless headlines warrant it.\n"
         "- Deduplicate similar items; prefer cross-market takeaways over raw headlines.\n"
-        "- Each bullet ≤ 22 words; add a short driver or implication when possible.\n"
-        "- Use Europe/Paris date context if you include any dates.\n"
+        "- Each bullet ≤ 30 words; add a short driver or implication when possible.\n"
+        "- Make clear sentences, not abbreviations.\n"
         "- Output MUST be valid Markdown with the four section headers above (omit empty ones)."
         "\n\nHeadlines:\n" + text
     )
@@ -418,7 +417,7 @@ def render_news_aggregator():
         df_view = df[["Time", "source", "title", "link"]].rename(columns={"source": "Source", "title": "Title", "link": "Link"})
         _render_clickable_table(df_view)
 
-        # 5) Résumé IA (sur le sous-ensemble capé) — affiché en GRIS
+        # 5) Résumé IA (sur le sous-ensemble capé) — affiché en NOIR
         if _mistral_key():
             sample = "\n".join([f"- {t}" for t in df["title"].head(10).astype(str).tolist()])
             if st.button("Summarize top 10 (AI)"):
@@ -426,11 +425,12 @@ def render_news_aggregator():
                     summary = summarize_with_mistral(sample)
                 if summary:
                     st.markdown("**AI market summary**")
-                    st.markdown(f'<div style="color:#6b7280">{summary}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="color:black">{summary}</div>', unsafe_allow_html=True)
                 else:
                     st.info("Could not summarize right now.")
+
     else:
-        st.info("No headlines fetched yet. Check your internet connection or adjust sources.")
+        st.info("No headlines fetched yet. Wait until the end of the day!")
 
 def _to_plot_df(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or getattr(df, "empty", True):
@@ -630,8 +630,9 @@ def render_central_banks():
 
     # Removed RSS table of central banks news per request
 
-
 def render_deal_watch():
+    from datetime import datetime  # utilisé pour le nom du fichier
+
     st.markdown("#### Deal Tracker")
     st.caption("Auto-pulls bond issuance press releases via RSS (editable), filters by keywords, and lets you export.")
 
@@ -643,8 +644,10 @@ def render_deal_watch():
     with st.expander("Edit deal feeds", expanded=False):
         deal_sources = _sources_editor(deal_sources, key="deal_sources_editor")
 
-    default_kw = "bond|notes|debenture|debentures|covered bond|green bond|sustainability-linked|SLB|senior unsecured|secured notes|benchmark|tap|syndicated"
-    kw = st.text_input("Filter by keywords (regex)", value=default_kw)
+    # --- Hidden keywords (not displayed) ---
+    default_kw = r"bond|notes|covered|green bond|subordinated|hybrid|AT1|Tier 2|convertible|syndicated|midswap|spread|coupon|maturity|issuance"
+    kw = default_kw  # pas d'UI — on garde les filtres cachés
+
     limit = st.number_input("Items per feed", min_value=5, max_value=50, value=15, step=5)
 
     urls = list(deal_sources.values())
@@ -653,7 +656,7 @@ def render_deal_watch():
         mask = df["title"].str.contains(kw, case=False, na=False, regex=True)
         df = df[mask].copy()
         df["Time"] = df["published"].dt.tz_convert("Europe/Paris").dt.strftime("%Y-%m-%d %H:%M")
-        view = df[["Time", "source", "title", "link"]].rename(columns={"source":"Source","title":"Title","link":"Link"})
+        view = df[["Time", "source", "title", "link"]].rename(columns={"source": "Source", "title": "Title", "link": "Link"})
         _render_clickable_table(view)
         st.download_button(
             "Download deals list (CSV)",
@@ -663,7 +666,6 @@ def render_deal_watch():
         )
     else:
         st.info("No deal headlines fetched yet. Edit/add sources if needed.")
-
 
 # =======================================================
 # Main render() with hard guards (prevents safe_tab warnings)

@@ -381,12 +381,75 @@ def render():
     left, right = st.columns(2)
 
     # Price–Yield
-    y0 = ytm
-    bps = grid_bps / 10_000.0
-    y_grid = np.linspace(max(-0.99, y0 - bps), y0 + bps, 41)
-    prices = np.array([price_from_yield(schedule, y, freq, notional, 0.0)[0] for y in y_grid])
+    #y0 = ytm
+    #bps = grid_bps / 10_000.0
+    #y_grid = np.linspace(max(-0.99, y0 - bps), y0 + bps, 41)
+    #prices = np.array([price_from_yield(schedule, y, freq, notional, 0.0)[0] for y in y_grid])
+    #with left:
+        #st.altair_chart(_chart_price_yield(y_grid*100, prices), use_container_width=True)
+
+
+    # --- Price–Yield interactif ---
     with left:
-        st.altair_chart(_chart_price_yield(y_grid*100, prices), use_container_width=True)
+        st.subheader("Price–Yield")
+
+        # 1) Contrôle de l'axe X (autour du YTM en ± bp)
+        #    Valeur par défaut = l'ancien grid_bps si dispo, sinon 200 bps
+        default_bps = int(grid_bps) if "grid_bps" in locals() else 200
+        x_half_range_bps = st.slider("Écart sur l’axe X (± basis points)", 25, 1000, default_bps, step=25)
+
+        # 2) Recalcule la grille de rendements selon le slider
+        y0 = ytm
+        bps = x_half_range_bps / 10_000.0
+        y_grid = np.linspace(max(-0.99, y0 - bps), y0 + bps, 41)
+
+        # 3) Calcule les prix
+        prices = np.array([price_from_yield(schedule, y, freq, notional, 0.0)[0] for y in y_grid])
+
+        # 4) Contrôle de l’axe Y
+        auto_y = st.checkbox("Axe Y automatique", value=True)
+        if auto_y:
+            y_domain = None
+        else:
+            p_min, p_max = float(prices.min()), float(prices.max())
+            # marge +/- 5% autour des valeurs observées
+            low_default  = max(0.0, p_min * 0.95)
+            high_default = p_max * 1.05
+            y_min, y_max = st.slider(
+                "Plage de prix (axe Y)",
+                min_value=float(max(0.0, p_min * 0.8)),
+                max_value=float(p_max * 1.2),
+                value=(float(low_default), float(high_default)),
+            )
+            y_domain = [y_min, y_max]
+
+        # 5) Construit le DataFrame
+        df_plot = pd.DataFrame({
+            "Yield (%)": y_grid * 100.0,
+            "Price": prices
+        })
+
+        # 6) Chart Altair interactif (pan/zoom + hover)
+        x_domain = [df_plot["Yield (%)"].min(), df_plot["Yield (%)"].max()]
+        hover = alt.selection_point(fields=["Yield (%)"], nearest=True, on="mouseover", empty="none")
+
+        base = alt.Chart(df_plot)
+
+        line = base.mark_line().encode(
+            x=alt.X("Yield (%):Q", scale=alt.Scale(domain=x_domain), title="Yield (%)"),
+            y=alt.Y("Price:Q", scale=None if y_domain is None else alt.Scale(domain=y_domain), title="Price"),
+            tooltip=[alt.Tooltip("Yield (%):Q", format=".2f"), alt.Tooltip("Price:Q", format=",.2f")]
+        )
+
+        points = base.mark_circle(size=60).encode(
+            x="Yield (%):Q",
+            y="Price:Q",
+            opacity=alt.condition(hover, alt.value(1), alt.value(0))
+        ).add_params(hover)
+
+        chart = (line + points).interactive()  # active pan/zoom
+
+        st.altair_chart(chart, use_container_width=True)
 
     # Cash‑flows
     with right:
@@ -442,24 +505,19 @@ def render():
         with st.expander("Learn more — Fixed vs Floating vs Fixed‑to‑Floating"):
             _render_learn_more()
 
-# Example PDF
-st.markdown("### Example — Open PDF")
-
-pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "Fixed to Floating Rate Notes Example - J.P. Morgan Chase & Co (2021).pdf"
-
-if pdf_path.exists():
-    pdf_url = f"./Library/{pdf_path.name}"  # chemin relatif utilisable par Streamlit
-
-    st.markdown(
-        f"""
-        <a href="{pdf_url}" target="_blank">
-            📖 Open: Fixed-to-Floating Notes — J.P. Morgan Chase & Co (2021) (PDF)
-        </a>
-        """,
-        unsafe_allow_html=True,
-    )
-else:
-    st.info(f"Place the example PDF at **{pdf_path}** (filename must match exactly).")
+    # Example PDF
+    st.markdown("### Example — Download")
+    pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "Fixed to Floating Rate Notes Example - J.P. Morgan Chase & Co (2021).pdf"
+    if pdf_path.exists():
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                "Download: Fixed‑to‑Floating Notes — J.P. Morgan Chase & Co (2021) (PDF)",
+                data=f.read(),
+                file_name=pdf_path.name,
+                mime="application/pdf",
+            )
+    else:
+        st.info(f"Place the example PDF at **{pdf_path}** (filename must match exactly).")
 
 def _render_learn_more():
     st.markdown(

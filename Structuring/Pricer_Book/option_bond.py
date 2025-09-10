@@ -174,10 +174,15 @@ def render():
                 "Call at (years)": [2.0, 3.0, 4.0],
                 "Call Price (% of par)": [101.0, 100.5, 100.0],
             })
+
         call_table = st.data_editor(
-            st.session_state.call_table, num_rows="dynamic", use_container_width=True, key="call_editor",
-            help="Add, edit, or remove call dates and prices (as % of par)."
+            st.session_state.call_table,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="call_editor",
         )
+        st.caption("Add, edit, or remove call dates and prices (as % of par).")
+
         st.session_state.call_table = call_table.copy()
         put_table = None
     else:
@@ -186,10 +191,15 @@ def render():
                 "Put at (years)": [2.0, 4.0],
                 "Put Price (% of par)": [100.0, 100.0],
             })
+
         put_table = st.data_editor(
-            st.session_state.put_table, num_rows="dynamic", use_container_width=True, key="put_editor",
-            help="Investor put options: redemption at given dates/prices (as % of par)."
+            st.session_state.put_table,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="put_editor",
         )
+        st.caption("Investor put options: redemption at given dates/prices (as % of par).")
+
         st.session_state.put_table = put_table.copy()
         call_table = None
 
@@ -336,36 +346,33 @@ def render():
         with st.expander("Learn More"):
             _render_learn_more()
 
-    # Example PDF links (place files in DCM_Project/Library/)
-    st.markdown("### Examples — Open")
-
+    # Example PDF downloads (place files in DCM_Project/Library/)
+    st.markdown("### Examples — Download")
     c_pdf = Path(__file__).resolve().parent.parent / "Library" / "Callable Bond Example - UniCredit (2024).pdf"
     p_pdf = Path(__file__).resolve().parent.parent / "Library" / "Puttable Bond Example - Legrand (2025).pdf"
 
     cols = st.columns(2)
     with cols[0]:
         if c_pdf.exists():
-            st.markdown(
-                f"""
-                <a href="./Library/{c_pdf.name}" target="_blank">
-                    📖 Open: Callable Bond — UniCredit (2024) (PDF)
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
+            with open(c_pdf, "rb") as f:
+                st.download_button(
+                    "Download: Callable Bond — UniCredit (2024) (PDF)",
+                    data=f.read(),
+                    file_name=c_pdf.name,
+                    mime="application/pdf",
+                )
         else:
             st.info(f"Place the callable example at **{c_pdf}**.")
 
     with cols[1]:
         if p_pdf.exists():
-            st.markdown(
-            f"""
-                <a href="./Library/{p_pdf.name}" target="_blank">
-                    📖 Open: Puttable Bond — Legrand (2025) (PDF)
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
+            with open(p_pdf, "rb") as f:
+                st.download_button(
+                    "Download: Puttable Bond — Legrand (2025) (PDF)",
+                    data=f.read(),
+                    file_name=p_pdf.name,
+                    mime="application/pdf",
+                )
         else:
             st.info(f"Place the puttable example at **{p_pdf}**.")
 
