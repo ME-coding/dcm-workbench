@@ -194,36 +194,20 @@ def _mistral_key() -> str:
     k = st.secrets.get("MISTRAL_API_KEY", "") if hasattr(st, "secrets") else ""
     return k or os.environ.get("MISTRAL_API_KEY", "") or ""
 
-def summarize_with_mistral(text: str, max_bullets: int = 8, temperature: float = 0.2) -> Optional[str]:
-    """
-    Improved: forces a compact, sectioned Markdown summary suitable for DCM users.
-    Output sections (omit empty ones): Macroeconomics / Markets / Geopolitics & Policy / Primary & Corporate.
-    """
+
+def summarize_with_mistral(text: str, max_bullets: int = 6, temperature: float = 0.2) -> Optional[str]:
     api_key = _mistral_key()
     if not api_key or requests is None or not text.strip():
         return None
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
     prompt = (
-        "You are a financial news editor for a Global Markets journal. "
-        "From the headlines below, produce a VERY concise Markdown summary with clear sections. "
-        f"Use at most {max_bullets} bullets TOTAL across all sections. No intro or outro.\n\n"
-        "Sections (omit if no signal):\n"
-        "1) *Macroeconomics* – growth/inflation data, policy guidance, fiscal updates, energy supply/demand shocks.\n"
-        "2) *Markets* – Rates/Credit/Equities/FX/Commodities: key moves, drivers, and liquidity/volatility notes.\n"
-        "3) *Geopolitics & Policy* – elections, conflicts, sanctions, trade/industrial policy with market impact.\n"
-        "4) *Primary & Corporate* – DCM/ECM/M&A, supply outlook (IG/HY/SSA), notable deals, funding costs.\n\n"
-        "Rules:\n"
-        "- Deduplicate similar items; prefer cross-market takeaways over raw headlines.\n"
-        "- Each bullet ≤ 30 words; add a short driver or implication when possible.\n"
-        "- Make clear sentences, not abbreviations.\n"
-        "- Output MUST be valid Markdown with the four section headers above (omit empty ones)."
-        "\n\nHeadlines:\n" + text
+        f"Summarize the following DCM-relevant headlines into up to {max_bullets} bullet points. "
+        f"Focus on rates, credit markets, supply (deals), and central banks. "
+        "Return concise bullets in English.\n\n" + text
     )
-
     messages = [
-        {"role": "system", "content": "Write crisp, neutral market summaries for professional DCM users. Output Markdown only."},
+        {"role": "system", "content": "You write concise market summaries for Debt Capital Markets."},
         {"role": "user", "content": prompt},
     ]
     payload = {"model": "mistral-small-latest", "messages": messages, "temperature": temperature}
@@ -234,7 +218,6 @@ def summarize_with_mistral(text: str, max_bullets: int = 8, temperature: float =
         return data["choices"][0]["message"]["content"].strip()
     except Exception:
         return None
-
 
 # =======================================================
 # UI helpers (links & tables)
