@@ -147,24 +147,44 @@ def render():
     st.markdown("### Results & Charts")
     left, right = st.columns(2)
 
+# --- Results & Charts (interactive) ---
+
     y0 = ytm
     bps = grid_bps / 10_000.0
     y_grid = np.linspace(max(-0.99, y0 - bps), y0 + bps, 41)
     prices = np.array([price_from_yield(schedule, y, freq, notional, 0.0)[0] for y in y_grid])
+
     with left:
-        st.altair_chart(price_yield_chart(y_grid * 100, prices), use_container_width=True)
+        st.altair_chart(
+            price_yield_chart(y_grid * 100, prices).interactive(),
+            use_container_width=True
+        )
 
     with right:
-        st.altair_chart(cashflow_breakdown_chart(schedule), use_container_width=True)
+        st.altair_chart(
+            cashflow_breakdown_chart(schedule).interactive(),
+            use_container_width=True
+        )
 
     e1, e2 = st.columns(2)
     with e1:
-        st.altair_chart(amortization_chart(schedule), use_container_width=True)
+        st.altair_chart(
+            amortization_chart(schedule).interactive(),
+            use_container_width=True
+        )
+
     with e2:
         if profit_path_times is not None and profit_path_pct is not None:
-            st.altair_chart(rate_path_chart(profit_path_times, profit_path_pct, title="Profit Rate Path (Step Mode)"), use_container_width=True)
+            st.altair_chart(
+                rate_path_chart(
+                    profit_path_times, profit_path_pct, title="Profit Rate Path (Step Mode)"
+                ).interactive(),
+                use_container_width=True
+            )
         else:
             st.caption("Switch to **Step table** to visualize a profit-rate path.")
+
+#--------------------------------------------
 
     st.markdown("### Cash flow table")
     table = schedule.copy()
@@ -203,19 +223,19 @@ def render():
 
     pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "Sukuk Bond Example - Indonesia (2023).pdf"
     if pdf_path.exists():
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                "Download: Sukuk Bond Example — Indonesia (2023) (PDF)",
-                data=f.read(),
-                file_name=pdf_path.name,
-                mime="application/pdf",
-            )
+        st.markdown(
+            f"""
+            <a href="./Library/{pdf_path.name}" target="_blank">
+                📖 Open: Sukuk Bond Example — Indonesia (2023) (PDF)
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
         st.info(
-            f"Place the example PDF at **{pdf_path}** to enable download. "
+            f"Place the example PDF at **{pdf_path}** to enable viewing. "
             "Filename must match exactly."
         )
-
 
 def _render_learn_more():
     st.markdown(

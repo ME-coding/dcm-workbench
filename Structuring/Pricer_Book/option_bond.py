@@ -336,36 +336,38 @@ def render():
         with st.expander("Learn More"):
             _render_learn_more()
 
-    # Example PDF downloads (place files in DCM_Project/Library/)
-    st.markdown("### Examples — Download")
+    # Example PDF links (place files in DCM_Project/Library/)
+    st.markdown("### Examples — Open")
+
     c_pdf = Path(__file__).resolve().parent.parent / "Library" / "Callable Bond Example - UniCredit (2024).pdf"
     p_pdf = Path(__file__).resolve().parent.parent / "Library" / "Puttable Bond Example - Legrand (2025).pdf"
 
     cols = st.columns(2)
     with cols[0]:
         if c_pdf.exists():
-            with open(c_pdf, "rb") as f:
-                st.download_button(
-                    "Download: Callable Bond — UniCredit (2024) (PDF)",
-                    data=f.read(),
-                    file_name=c_pdf.name,
-                    mime="application/pdf",
-                )
+            st.markdown(
+                f"""
+                <a href="./Library/{c_pdf.name}" target="_blank">
+                    📖 Open: Callable Bond — UniCredit (2024) (PDF)
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
         else:
             st.info(f"Place the callable example at **{c_pdf}**.")
 
     with cols[1]:
         if p_pdf.exists():
-            with open(p_pdf, "rb") as f:
-                st.download_button(
-                    "Download: Puttable Bond — Legrand (2025) (PDF)",
-                    data=f.read(),
-                    file_name=p_pdf.name,
-                    mime="application/pdf",
-                )
+            st.markdown(
+            f"""
+                <a href="./Library/{p_pdf.name}" target="_blank">
+                    📖 Open: Puttable Bond — Legrand (2025) (PDF)
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
         else:
             st.info(f"Place the puttable example at **{p_pdf}**.")
-
 
 def _render_learn_more():
     st.markdown(

@@ -31,7 +31,7 @@ from .core import (
 from .visuals import (
     price_yield_chart,
     cashflow_breakdown_chart,
-    amortization_chart,
+    amortization_chart,  # (import conservé mais non utilisé après suppression du graphe)
     rate_path_chart,
 )
 import math
@@ -118,7 +118,7 @@ def zcb_price_mc_cir(r_paths: np.ndarray, T: float, M: int) -> Tuple[float, np.n
 # =========================================================
 
 def render():
-    st.subheader("Structuring Desk — Zero‑Coupon Bond Pricer")
+    st.subheader("Structuring Desk — Zero-Coupon Bond Pricer")
 
     # ---- Inputs (cohérents avec le pricer global) ----
     default_notional, default_years, default_yield = 1_000_000.0, 5.0, 5.00
@@ -135,6 +135,13 @@ def render():
     with c4:
         accrued_frac = st.slider("Elapsed in current period (%)", 0, 100, 0,
                                  help="Accrued (approx.) as % of the current period — zero for pure ZCB, kept for UI symmetry.") / 100.0
+
+    # --- Choix d'assiette pour que Accrued / Dirty varient sur un ZCB ---
+    accrual_basis = st.selectbox(
+        "Accrued basis (ZCB display)",
+        ["None (pure ZCB)", "Yield-based (educational)"],
+        help="ZCB n'a pas d'accrual de coupon. L'option 'Yield-based' calcule un accrued pédagogique = (100 × y/f × elapsed)."
+    )
 
     schedule = build_zcb_schedule(notional, freq, years)
 
@@ -155,23 +162,31 @@ def render():
 
     # ---- Deterministic pricing (discounting with YTM) ----
     if solve_mode == "Price (given Yield)":
-        clean, accrued, dirty = price_from_yield(schedule, ytm, freq, notional, accrued_frac=accrued_frac)
+        clean, accrued_engine, dirty_engine = price_from_yield(schedule, ytm, freq, notional, accrued_frac=accrued_frac)
         _, mac_dur, mod_dur, conv = macaulay_duration_convexity(schedule, ytm, freq)
     else:
         ytm = yield_from_price(schedule, clean_target, freq, notional)
-        clean, accrued, dirty = price_from_yield(schedule, ytm, freq, notional, accrued_frac=accrued_frac)
+        clean, accrued_engine, dirty_engine = price_from_yield(schedule, ytm, freq, notional, accrued_frac=accrued_frac)
         _, mac_dur, mod_dur, conv = macaulay_duration_convexity(schedule, ytm, freq)
+
+    # --- Accrued/Dirty (affichage) : base pédagogique pour ZCB ---
+    if accrual_basis.startswith("Yield"):
+        accrued_disp = 100.0 * (ytm / freq) * accrued_frac  # en "per 100"
+        dirty_disp = clean + accrued_disp
+    else:
+        accrued_disp = accrued_engine
+        dirty_disp = dirty_engine
 
     # ---- KPIs ----
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Clean Price (per 100)", f"{clean:,.4f}")
-    k2.metric("Accrued (per 100)", f"{accrued:,.4f}")
-    k3.metric("Dirty Price (per 100)", f"{dirty:,.4f}")
+    k2.metric("Accrued (per 100)", f"{accrued_disp:,.4f}")
+    k3.metric("Dirty Price (per 100)", f"{dirty_disp:,.4f}")
     k4.metric("Yield to Maturity (%)", f"{ytm*100:,.4f}")
 
-    k5, k6, k7 = st.columns(3)
+    # (Retrait de "Modified Duration (yrs)")
+    k5, k7 = st.columns(2)
     k5.metric("Macaulay Duration (yrs)", f"{mac_dur:,.4f}")
-    k6.metric("Modified Duration (yrs)", f"{mod_dur:,.4f}")
     k7.metric("Convexity (yrs²)", f"{conv:,.4f}")
 
     # =========================================================
@@ -180,34 +195,36 @@ def render():
     st.markdown("### Results & Charts")
 
     left, right = st.columns(2)
-    # Price–Yield curve around current YTM
+    # Price–Yield curve around current YTM (interactive)
     y0 = ytm
     bps = grid_bps / 10_000.0
     y_grid = np.linspace(max(-0.99, y0 - bps), y0 + bps, 41)
     prices = np.array([price_from_yield(schedule, y, freq, notional, 0.0)[0] for y in y_grid])
     with left:
-        st.altair_chart(price_yield_chart(y_grid * 100, prices), use_container_width=True)
+        st.altair_chart(price_yield_chart(y_grid * 100, prices).interactive(), use_container_width=True)
 
-    # Cash‑flow breakdown (only principal at T)
+    # Cash-flow breakdown (only principal at T) — interactif
     with right:
-        st.altair_chart(cashflow_breakdown_chart(schedule), use_container_width=True)
+        st.altair_chart(cashflow_breakdown_chart(schedule).interactive(), use_container_width=True)
 
-    a1, a2 = st.columns(2)
-    with a1:
-        st.altair_chart(amortization_chart(schedule), use_container_width=True)
+    # (Graphique d'amortissement supprimé comme demandé)
 
     # =========================================================
     # Monte Carlo (CIR) section
     # =========================================================
     st.markdown("### Monte Carlo (CIR) — Optional")
-    with st.expander("Simulate short‑rate (CIR) and estimate B(0,T)"):
+    st.caption("Modélise le **short rate** via le processus **CIR(85)** et estime le prix ZCB comme "
+               "l’espérance du facteur d’actualisation :  \(B(0,T)=\\mathbb{E}[e^{-\int r_s ds}]\). "
+               "Utile pour visualiser le risque de structure par terme (pédagogique).")
+
+    with st.expander("Simulate short-rate (CIR) and estimate B(0,T)"):
         mc1, mc2, mc3, mc4 = st.columns(4)
         with mc1:
             r0 = st.number_input("r0 (initial short rate)", min_value=0.0, value=0.01, step=0.005, format="%.4f")
         with mc2:
             kappa = st.number_input("κ (mean reversion)", min_value=0.001, value=0.10, step=0.01, format="%.4f")
         with mc3:
-            theta = st.number_input("θ (long‑run mean)", min_value=0.0, value=0.03, step=0.005, format="%.4f")
+            theta = st.number_input("θ (long-run mean)", min_value=0.0, value=0.03, step=0.005, format="%.4f")
         with mc4:
             sigma = st.number_input("σ (vol of short rate)", min_value=0.001, value=0.20, step=0.01, format="%.4f")
 
@@ -217,14 +234,14 @@ def render():
         with mc6:
             paths = st.number_input("Paths (I)", min_value=100, value=10_000, step=1_000)
         with mc7:
-            exact = st.checkbox("Use exact sampling", value=True, help="If unticked, uses Euler full‑truncation.")
+            exact = st.checkbox("Use exact sampling", value=True, help="If unticked, uses Euler full-truncation.")
 
         if st.button("Run Monte Carlo (CIR)"):
             r_paths = cir_generate_paths(r0, years, int(steps), int(paths), kappa, theta, sigma, exact=exact)
             mc_price, avg_rate_path, price_path_mean = zcb_price_mc_cir(r_paths, years, int(steps))
 
             st.success(f"Monte Carlo ZCB estimate (per 1 of notional): {mc_price:,.6f}")
-            # Two charts: short-rate path (mean) and price path (mean)
+            # Two charts: short-rate path (mean) and price path (mean) — interactifs
             df_rate = pd.DataFrame({"Step": np.arange(len(avg_rate_path)), "Short rate": avg_rate_path})
             df_price = pd.DataFrame({"Step": np.arange(len(price_path_mean)), "Price (per 1)": price_path_mean})
 
@@ -232,13 +249,15 @@ def render():
                 alt.Chart(df_rate)
                 .mark_line()
                 .encode(x="Step:Q", y=alt.Y("Short rate:Q", title="short rate"), tooltip=["Step","Short rate"])
-                .properties(title="Short‑rate path (mean of simulations)", height=260)
+                .properties(title="Short-rate path (mean of simulations)", height=260)
+                .interactive()
             )
             ch_price = (
                 alt.Chart(df_price)
                 .mark_line()
                 .encode(x="Step:Q", y=alt.Y("Price (per 1):Q", title="price"), tooltip=["Step","Price (per 1)"])
                 .properties(title="Price path (mean of simulations)", height=260)
+                .interactive()
             )
 
             ccols = st.columns(2)
@@ -247,7 +266,7 @@ def render():
             with ccols[1]:
                 st.altair_chart(ch_price, use_container_width=True)
 
-            st.caption("Monte Carlo estimate discounts simulated short‑rate paths: "
+            st.caption("Monte Carlo estimate discounts simulated short-rate paths: "
                        "B(0,T) = E[exp(−∫ r_s ds)]. Mean paths are for visualization; pricing uses all paths.")
 
     # ---- Cash flow table & export ----
@@ -267,12 +286,12 @@ def render():
     # Theory / Learn more / How we calculate it / Example
     # =========================================================
     st.markdown("---")
-    st.markdown("## Zero‑Coupon Bond — Definitions")
+    st.markdown("## Zero-Coupon Bond — Definitions")
 
     st.markdown(
         """
-**What is a Zero‑Coupon Bond?**  
-- Pays **no periodic coupons**; a single **lump‑sum** redemption at maturity.  
+**What is a Zero-Coupon Bond?**  
+- Pays **no periodic coupons**; a single **lump-sum** redemption at maturity.  
 - Issued at a **deep discount** to par; investor return = difference between **purchase price** and **face value**.  
 - Duration equals **time to maturity** for a pure ZCB; highly sensitive to rates.
         """
@@ -280,7 +299,7 @@ def render():
 
     # Learn more (modal/expander)
     if hasattr(st, "dialog"):
-        @st.dialog("Learn more about Zero‑Coupon Bonds")
+        @st.dialog("Learn more about Zero-Coupon Bonds")
         def _more():
             _render_learn_more()
         if st.button("Learn More"):
@@ -290,19 +309,20 @@ def render():
             _render_learn_more()
 
     # Example PDF
-    st.markdown("### Example — Download")
+    st.markdown("### Example — Open")
     pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "Zero Coupon Notes Example - HSBC (2023).pdf"
+
     if pdf_path.exists():
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                "Download: Zero Coupon Notes — HSBC (2023) (PDF)",
-                data=f.read(),
-                file_name=pdf_path.name,
-                mime="application/pdf",
-            )
+        st.markdown(
+            f"""
+            <a href="./Library/{pdf_path.name}" target="_blank">
+                📖 Open: Zero Coupon Notes — HSBC (2023) (PDF)
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
         st.info(f"Place the example PDF at **{pdf_path}** (filename must match exactly).")
-
 
 def _render_learn_more():
     st.markdown(
@@ -314,7 +334,7 @@ For a notional \(N\) with maturity \(T\) and annual yield \(y\) with frequency \
 \[
 \text{Clean Price per 100} = 100 \times \left(1+\frac{y}{f}\right)^{-fT}
 \]
-In our implementation, we build a one-line cash‑flow table (principal at \(T\)) and reuse the same
+In our implementation, we build a one-line cash-flow table (principal at \(T\)) and reuse the same
 pricing/duration/convexity engine as other products.
 
 **Monte Carlo (CIR short rate):**  
@@ -322,20 +342,20 @@ Model the short rate \(r_t\) under **CIR(85)**:
 \[
 dr_t = \kappa(\theta - r_t)\,dt + \sigma \sqrt{r_t}\,dW_t
 \]
-The ZCB price is the risk‑neutral expectation of the **discount factor**:
+The ZCB price is the risk-neutral expectation of the **discount factor**:
 \[
 B(0,T) = \mathbb{E}\!\left[\exp\!\left(-\int_0^T r_s\,ds\right)\right].
 \]
-We simulate many short‑rate paths using the **exact** scheme (or Euler full‑truncation), approximate the integral with
+We simulate many short-rate paths using the **exact** scheme (or Euler full-truncation), approximate the integral with
 a trapezoid, compute \(\exp(-\int r\,ds)\) per path, then average across paths.
 
 **When to use which?**  
-- Yield‑based discounting is **fast** and consistent with desk conventions.  
-- Monte Carlo (CIR) is useful to **illustrate term‑structure risk** and stress parameter changes; it’s educational and
+- Yield-based discounting is **fast** and consistent with desk conventions.  
+- Monte Carlo (CIR) is useful to **illustrate term-structure risk** and stress parameter changes; it’s educational and
 aligns with the course/code you provided.
 
 **Caveats:**  
-- Real‑world pricing typically uses a **fitted discount curve** (OIS/treasury) with day‑count; we abstract those details.  
+- Real-world pricing typically uses a **fitted discount curve** (OIS/treasury) with day-count; we abstract those details.  
 - CIR parameter choice impacts level/vol of rates; calibrate to market if using beyond education.
         """
     )

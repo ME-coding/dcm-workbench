@@ -195,18 +195,36 @@ def _mistral_key() -> str:
     return k or os.environ.get("MISTRAL_API_KEY", "") or ""
 
 def summarize_with_mistral(text: str, max_bullets: int = 6, temperature: float = 0.2) -> Optional[str]:
+    """
+    Improved: forces a compact, sectioned Markdown summary suitable for DCM users.
+    Output sections (omit empty ones): Macroeconomics / Markets / Geopolitics & Policy / Primary & Corporate.
+    """
     api_key = _mistral_key()
     if not api_key or requests is None or not text.strip():
         return None
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
     prompt = (
-        f"Summarize the following DCM-relevant headlines into up to {max_bullets} bullet points. "
-        f"Focus on rates, credit markets, supply (deals), and central banks. "
-        "Return concise bullets in English.\n\n" + text
+        "You are a financial news editor for a Debt Capital Markets workbench. "
+        "From the headlines below, produce a VERY concise Markdown summary with clear sections. "
+        f"Use at most {max_bullets} bullets TOTAL across all sections. No intro or outro.\n\n"
+        "Sections (omit if no signal):\n"
+        "1) **Macroeconomics** – growth/inflation data, policy guidance, fiscal updates, energy supply/demand shocks.\n"
+        "2) **Markets** – Rates/Credit/Equities/FX/Commodities: key moves, drivers, and liquidity/volatility notes.\n"
+        "3) **Geopolitics & Policy** – elections, conflicts, sanctions, trade/industrial policy with market impact.\n"
+        "4) **Primary & Corporate** – DCM/ECM/M&A, supply outlook (IG/HY/SSA), notable deals, funding costs.\n\n"
+        "Rules:\n"
+        "- Be Europe-/EMEA-aware; don’t fixate on the Fed unless headlines warrant it.\n"
+        "- Deduplicate similar items; prefer cross-market takeaways over raw headlines.\n"
+        "- Each bullet ≤ 22 words; add a short driver or implication when possible.\n"
+        "- Use Europe/Paris date context if you include any dates.\n"
+        "- Output MUST be valid Markdown with the four section headers above (omit empty ones)."
+        "\n\nHeadlines:\n" + text
     )
+
     messages = [
-        {"role": "system", "content": "You write concise market summaries for Debt Capital Markets."},
+        {"role": "system", "content": "Write crisp, neutral market summaries for professional DCM users. Output Markdown only."},
         {"role": "user", "content": prompt},
     ]
     payload = {"model": "mistral-small-latest", "messages": messages, "temperature": temperature}
@@ -343,18 +361,35 @@ def render_news_aggregator():
     st.markdown("#### News aggregator (RSS)")
     st.caption("Pulls headlines from public RSS sources. Filter by keyword and optionally summarize with AI.")
 
+    # ---------- EXPANDED DEFAULT SOURCES (macro/markets/geopolitics) ----------
     sources = {
+        # Markets / Business
         "Reuters Business": "http://feeds.reuters.com/reuters/businessNews",
         "Reuters Markets": "http://feeds.reuters.com/reuters/marketsNews",
+        "Reuters Commodities": "http://feeds.reuters.com/reuters/commoditiesNews",
+        "Reuters Energy": "http://feeds.reuters.com/reuters/energyNews",
+        "Reuters Forex": "http://feeds.reuters.com/reuters/forexNews",
         "WSJ Markets": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
         "MarketWatch Top": "https://www.marketwatch.com/marketwatch/rss/topstories",
+
+        # World / Geopolitics
+        "Reuters World": "http://feeds.reuters.com/Reuters/worldNews",
+        "WSJ World": "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+        "CNBC Top News": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+
+        # Official / Policy
         "Fed — All Press": "https://www.federalreserve.gov/feeds/press_all.xml",
         "ECB — Press & Speeches": "https://www.ecb.europa.eu/rss/press.html",
+        "BIS — Press": "https://www.bis.org/press_rss.xml",
+        "OECD — Newsroom": "https://www.oecd.org/newsroom/rss.xml",
     }
 
     c1, c2 = st.columns([2, 1])
     with c1:
-        kw = st.text_input("Keyword filter (e.g., 'ECB', 'syndicate', 'IG issuance', 'swaps')", "")
+        kw = st.text_input(
+            "Keyword filter (e.g., 'ECB', 'syndicate', 'IG issuance', 'oil', 'FX', 'inflation', 'sanctions')",
+            ""
+        )
     with c2:
         limit = st.number_input("Items per feed", min_value=5, max_value=50, value=10, step=5)
 
@@ -383,7 +418,7 @@ def render_news_aggregator():
         df_view = df[["Time", "source", "title", "link"]].rename(columns={"source": "Source", "title": "Title", "link": "Link"})
         _render_clickable_table(df_view)
 
-        # 5) Résumé IA (sur le sous-ensemble capé)
+        # 5) Résumé IA (sur le sous-ensemble capé) — affiché en GRIS
         if _mistral_key():
             sample = "\n".join([f"- {t}" for t in df["title"].head(10).astype(str).tolist()])
             if st.button("Summarize top 10 (AI)"):
@@ -391,7 +426,7 @@ def render_news_aggregator():
                     summary = summarize_with_mistral(sample)
                 if summary:
                     st.markdown("**AI market summary**")
-                    st.markdown(summary)
+                    st.markdown(f'<div style="color:#6b7280">{summary}</div>', unsafe_allow_html=True)
                 else:
                     st.info("Could not summarize right now.")
     else:
@@ -455,6 +490,70 @@ def _latest_and_prev(df: pd.DataFrame) -> tuple[float, float]:
     return last, prev
 
 
+# =========================
+# NEW: Macroeconomics Dashboard (fusion)
+# =========================
+def render_macroeconomics_dashboard():
+    st.markdown("#### Macroeconomics Dashboard")
+    st.caption("Central banks & macro feeds — Official feeds and latest policy rates for Fed / ECB / BoE. Edit/add your own if needed.")
+
+    # --- Policy rates table only (keep) ---
+    rates_df = fetch_policy_rates()
+    if not rates_df.empty:
+        st.dataframe(rates_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Could not fetch policy rates automatically.")
+
+    st.markdown("##### Latest levels (10Y)")
+    # Keep only these 4 series
+    symbols = {
+        "DE 10Y Bund (%)": "DE10Y.BOND",
+        "FR 10Y OAT (%)":  "FR10Y.BOND",
+        "UK 10Y Gilt (%)": "GB10Y.BOND",
+        "US 10Y UST (%)":  "^TNX",
+    }
+    data = fetch_prices(symbols, period="1y", interval="1d")
+
+    cols = st.columns(4)
+    ordered_names = list(symbols.keys())
+    for i, name in enumerate(ordered_names):
+        df = data.get(name, pd.DataFrame())
+        if getattr(df, "empty", True):
+            continue
+        close, prev = _latest_and_prev(df)
+        if name.startswith("US "):
+            close /= 10.0
+            prev /= 10.0
+        delta = pct_change(close, prev)
+        with cols[i]:
+            st.metric(name, f"{close:,.3f}", f"{delta:+.2f}% d/d")
+
+    # --- One interactive multi-series chart (zoom/pan) ---
+    plot_rows = []
+    for nm, df in data.items():
+        if getattr(df, "empty", True):
+            continue
+        tmp = _to_plot_df(df)
+        if nm.startswith("US "):
+            tmp = tmp.copy()
+            tmp["Close"] = tmp["Close"] / 10.0
+        tmp["Series"] = nm
+        plot_rows.append(tmp)
+
+    if plot_rows:
+        merged = pd.concat(plot_rows, ignore_index=True)
+        base = alt.Chart(merged).mark_line().encode(
+            x=alt.X("Date:T", title=None),
+            y=alt.Y("Close:Q", title="Yield (%)", scale=alt.Scale(zero=False)),
+            color=alt.Color("Series:N", legend=alt.Legend(title=None)),
+            tooltip=[alt.Tooltip("Date:T"), alt.Tooltip("Series:N"), alt.Tooltip("Close:Q", format=",.3f")]
+        )
+        st.altair_chart(base.interactive().properties(height=260), use_container_width=True)
+    else:
+        st.info("No data to plot yet.")
+
+
+# (Legacy sections kept unchanged for the rest of the app, but no longer used in tabs)
 def render_rates_dashboard():
     st.markdown("#### Rates & markets dashboard")
     st.caption("Focus Europe. Yahoo Finance when available; otherwise demo series. Axes auto-rescaled for better readability.")
@@ -524,28 +623,16 @@ def render_central_banks():
         with c1:
             st.dataframe(rates_df, use_container_width=True, hide_index=True)
         with c2:
-            st.success("Policy rates auto-fetched (FRED / BoE). Data shown in Europe/Paris time.")
+            # Removed success callout per request
+            pass
     else:
-        st.info("Could not fetch policy rates automatically. You can still use the feeds below.")
+        st.info("Could not fetch policy rates automatically.")
 
-    cb_sources = {
-        "ECB — Press/Speeches": "https://www.ecb.europa.eu/rss/press.html",
-        "Federal Reserve — All Press": "https://www.federalreserve.gov/feeds/press_all.xml",
-    }
-    with st.expander("Edit feeds", expanded=False):
-        cb_sources = _sources_editor(cb_sources, key="cb_sources_editor")
-
-    df_cb = fetch_rss(list(cb_sources.values()), limit_per_feed=8) if cb_sources else pd.DataFrame(columns=["source", "title", "link", "published"])
-    if not df_cb.empty:
-        df_cb["Time"] = df_cb["published"].dt.tz_convert("Europe/Paris").dt.strftime("%Y-%m-%d %H:%M")
-        view = df_cb[["Time","source","title","link"]].rename(columns={"source":"Source","title":"Title","link":"Link"})
-        _render_clickable_table(view)
-    else:
-        st.info("No central bank items fetched. You can paste specific RSS URLs from ECB/Fed/BoE sites.")
+    # Removed RSS table of central banks news per request
 
 
 def render_deal_watch():
-    st.markdown("#### Deal watch")
+    st.markdown("#### Deal Tracker")
     st.caption("Auto-pulls bond issuance press releases via RSS (editable), filters by keywords, and lets you export.")
 
     deal_sources = {
@@ -571,7 +658,7 @@ def render_deal_watch():
         st.download_button(
             "Download deals list (CSV)",
             data=view.to_csv(index=False).encode("utf-8"),
-            file_name=f"deal_watch_{datetime.now():%Y%m%d_%H%M}.csv",
+            file_name=f"deal_tracker_{datetime.now():%Y%m%d_%H%M}.csv",
             mime="text/csv",
         )
     else:
@@ -595,7 +682,8 @@ def render():
 
         st.markdown("---")
 
-        tabs = st.tabs(["News Aggregator", "Rates Dashboard", "Central Banks", "Deal Watch"])
+        # Updated tabs
+        tabs = st.tabs(["News Aggregator", "Macroeconomics Dashboard", "Deal Tracker"])
 
         with tabs[0]:
             try:
@@ -605,21 +693,15 @@ def render():
 
         with tabs[1]:
             try:
-                render_rates_dashboard()
+                render_macroeconomics_dashboard()
             except Exception as e:
-                st.error(f"Rates Dashboard error: {e}")
+                st.error(f"Macroeconomics Dashboard error: {e}")
 
         with tabs[2]:
             try:
-                render_central_banks()
-            except Exception as e:
-                st.error(f"Central Banks error: {e}")
-
-        with tabs[3]:
-            try:
                 render_deal_watch()
             except Exception as e:
-                st.error(f"Deal Watch error: {e}")
+                st.error(f"Deal Tracker error: {e}")
 
     except Exception as e:
         st.error(f"News page load error: {e}")

@@ -12,7 +12,6 @@ from Structuring.Pricer_Book.fixed_floating_bond import render as fixed_floating
 from Structuring.Pricer_Book.slb_carrefour_case import render as slb_carrefour_case_ui
 from Structuring.Pricer_Book.convertible_bond import convertible_bond_ui
 
-
 from .Pricer_Book.visuals import price_yield_chart
 
 st.markdown(
@@ -28,9 +27,7 @@ def render():
     st.subheader("Structuring Desk — Pricer")
 
     products = [
-        "Fixed Rate Bond",
-        "Floating Rate Note (FRN)",
-        "Fixed-to-Floating Rate Note",
+        "Fixed / Float / Fixed-to-Float Rate Bond",   # <— fusion des 3 choix
         "Bonds with Options (Callable / Puttable)",
         "Convertible Bond (LSMC)",
         "Sukuk (Fixed/Ijara-style)",
@@ -39,14 +36,18 @@ def render():
     ]
 
     product_defs = {
-        "Fixed Rate Bond": "Fixed coupon throughout; classic clean/dirty, duration/convexity.",
-        "Floating Rate Note (FRN)": "Coupon = reference (SOFR/Euribor) + spread; resets each period.",
-        "Fixed-to-Floating Rate Note": "Starts fixed, switches to floating after a given date.",
-        "Bonds with Options (Callable / Puttable)": "Issuer call / investor put at scheduled dates/prices.",
-        "Convertible Bond (LSMC)": "Debt + equity option; LSMC regression pricer.",
-        "Sukuk (Fixed/Ijara-style)": "Sharia-compliant; educational ‘profit rate’ cashflow model.",
-        "Sustainability-Linked Bond — Carrefour Case": "Coupon steps driven by KPIs (Scope1&2; suppliers).",
-        "Zero-Coupon": "Discount instrument; no periodic coupons.",
+        "Fixed / Float / Fixed-to-Float Rate Bond":
+            "Obligations à taux fixe, flottant (réf. SOFR/Euribor + spread) ou à bascule fixe→flottant.",
+        "Bonds with Options (Callable / Puttable)":
+            "Call émetteur / put investisseur à des dates/prix prédéfinis.",
+        "Convertible Bond (LSMC)":
+            "Dette + option actions ; pricer par régression LSMC.",
+        "Sukuk (Fixed/Ijara-style)":
+            "Conforme à la sharia ; modèle de cash-flows ‘profit rate’ pédagogique.",
+        "Sustainability-Linked Bond — Carrefour Case":
+            "Coupons modulés par KPIs (Scope1&2 ; fournisseurs).",
+        "Zero-Coupon":
+            "Titre à escompte ; pas de coupons périodiques.",
     }
 
     st.markdown("### Parameters")
@@ -68,9 +69,7 @@ def render():
         st.markdown('</div>', unsafe_allow_html=True)
 
     registry = {
-        "Fixed Rate Bond": fixed_floating_bond_ui,
-        "Floating Rate Note (FRN)": fixed_floating_bond_ui,
-        "Fixed-to-Floating Rate Note": fixed_floating_bond_ui,
+        "Fixed / Float / Fixed-to-Float Rate Bond": fixed_floating_bond_ui,  # <— route unique
         "Bonds with Options (Callable / Puttable)": option_bond_ui,
         "Convertible Bond (LSMC)": convertible_bond_ui,
         "Sukuk (Fixed/Ijara-style)": sukuk_ui,

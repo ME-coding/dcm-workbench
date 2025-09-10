@@ -7,6 +7,7 @@ requests
 feedparser
 yfinance
 python-dateutil
+mistralai
 requests
 pypdf
 python-docx

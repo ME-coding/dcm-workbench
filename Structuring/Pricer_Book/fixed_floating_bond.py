@@ -200,16 +200,6 @@ def _chart_cashflows(schedule: pd.DataFrame):
         ).properties(title="Cash Flow Breakdown", height=260)
     )
 
-def _chart_amort(schedule: pd.DataFrame):
-    df = schedule[["Time (years)","Outstanding (begin)","Outstanding (end)"]].copy()
-    df = df.melt(id_vars=["Time (years)"], var_name="Bucket", value_name="Outstanding")
-    return (
-        alt.Chart(df)
-        .mark_line()
-        .encode(x="Time (years):Q", y=alt.Y("Outstanding:Q"), color="Bucket:N")
-        .properties(title="Outstanding over time", height=260)
-    )
-
 def _chart_rate_path(times: np.ndarray, rates_pct: np.ndarray, title: str = "Rate path (%)"):
     df = pd.DataFrame({"Time (years)": times, "Rate (%)": rates_pct})
     return (
@@ -402,15 +392,13 @@ def render():
     with right:
         st.altair_chart(_chart_cashflows(schedule), use_container_width=True)
 
-    a1, a2 = st.columns(2)
-    with a1:
-        st.altair_chart(_chart_amort(schedule), use_container_width=True)
-    with a2:
-        if rate_path_times is not None and rate_path_pct is not None:
-            title = "Coupon/Profit rate path (%)"
-            st.altair_chart(_chart_rate_path(rate_path_times, rate_path_pct, title), use_container_width=True)
-        else:
-            st.info("Rate path chart appears when the product has variable rates (FRN / Fixed‑to‑Floating).")
+    # Only show the rate path chart (Outstanding over time removed)
+    if rate_path_times is not None and rate_path_pct is not None:
+        title = "Coupon/Profit rate path (%)"
+        st.altair_chart(_chart_rate_path(rate_path_times, rate_path_pct, title), use_container_width=True)
+    else:
+        st.info("Rate path chart appears when the product has variable rates (FRN / Fixed-to-Floating).")
+
 
     # ---- Cash flow table & export
     st.markdown("### Cash flow table")
@@ -454,20 +442,24 @@ def render():
         with st.expander("Learn more — Fixed vs Floating vs Fixed‑to‑Floating"):
             _render_learn_more()
 
-    # Example PDF
-    st.markdown("### Example — Download")
-    pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "Fixed to Floating Rate Notes Example - J.P. Morgan Chase & Co (2021).pdf"
-    if pdf_path.exists():
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                "Download: Fixed‑to‑Floating Notes — J.P. Morgan Chase & Co (2021) (PDF)",
-                data=f.read(),
-                file_name=pdf_path.name,
-                mime="application/pdf",
-            )
-    else:
-        st.info(f"Place the example PDF at **{pdf_path}** (filename must match exactly).")
+# Example PDF
+st.markdown("### Example — Open PDF")
 
+pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "Fixed to Floating Rate Notes Example - J.P. Morgan Chase & Co (2021).pdf"
+
+if pdf_path.exists():
+    pdf_url = f"./Library/{pdf_path.name}"  # chemin relatif utilisable par Streamlit
+
+    st.markdown(
+        f"""
+        <a href="{pdf_url}" target="_blank">
+            📖 Open: Fixed-to-Floating Notes — J.P. Morgan Chase & Co (2021) (PDF)
+        </a>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    st.info(f"Place the example PDF at **{pdf_path}** (filename must match exactly).")
 
 def _render_learn_more():
     st.markdown(

@@ -197,14 +197,17 @@ def render():
 
     example_path = pathlib.Path("Library") / "Convertible Bond Example - Hoffmann-Green OCEANE (2024, by Portzamparc BNPP).pdf"
     if example_path.exists():
-        st.download_button(
-            "Download: Convertible Bond Example - Hoffmann-Green OCEANE (2024, by Portzamparc BNPP) (PDF)",
-            data=example_path.read_bytes(),
-            file_name=example_path.name,
-            mime="application/pdf",
+        st.markdown(
+            f"""
+            <a href="./Library/{example_path.name}" target="_blank">
+                📖 Open: Convertible Bond Example - Hoffmann-Green OCEANE (2024, by Portzamparc BNPP) (PDF)
+            </a>
+            """,
+            unsafe_allow_html=True,
         )
     else:
         st.info("Place the Hoffmann-Green OCEANE (2024) example PDF in `Library/` to enable this button.")
+
 
     if st.button("How do we calculate it?"):
         st.markdown("""
