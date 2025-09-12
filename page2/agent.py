@@ -46,30 +46,6 @@ SYSTEM_PROMPT = """You are a helpful, concise AI assistant embedded in a Debt Ca
 - If information is missing, say so briefly rather than inventing facts.
 """
 
-# ---------------------------- Small CSS ----------------------------
-st.markdown(
-    """
-    <style>
-      .card{
-        background: rgba(255,255,255,.04);
-        border: 1px solid rgba(255,255,255,.08);
-        border-radius: 14px; padding: 16px;
-        box-shadow: 0 8px 20px rgba(0,0,0,.12);
-        margin-bottom: 12px;
-      }
-      .muted{ color: rgba(255,255,255,.72); font-size: .92rem; }
-      .search-file{ font-weight:600; margin-top: .5rem; }
-      .snippet{ font-size: .95rem; line-height: 1.5; margin: .25rem 0 .5rem 0; }
-      .hits{ opacity:.8; font-size:.85rem; margin-left:.35rem; }
-      mark{
-        background: #224c99; color: #fff;
-        border-radius: 3px; padding: 0 2px;
-      }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # ---------------------------- Utils ----------------------------
 def _get_api_key() -> str:
     key = st.secrets.get("MISTRAL_API_KEY", "") if hasattr(st, "secrets") else ""
@@ -152,22 +128,18 @@ def _call_mistral(messages: List[Dict[str, str]], api_key: str) -> str:
         return ("⚠️ Missing API key. Add `MISTRAL_API_KEY` to `.streamlit/secrets.toml` "
                 "or set the environment variable.")
 
-    # Permet d'overrider le modèle via secrets/env (sinon garde la constante)
     model = st.secrets.get("MISTRAL_MODEL", os.getenv("MISTRAL_MODEL", MODEL_NAME))
-
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {"model": model, "messages": messages}
 
-    # Retry avec backoff (429/5xx)
     max_retries = 4
-    base_delay = 1.5  # secondes
+    base_delay = 1.5
 
     for attempt in range(max_retries + 1):
         try:
             r = _requests.post(url, headers=headers, json=payload, timeout=60)
             if r.status_code == 429 or 500 <= r.status_code < 600:
-                # calcul d'un backoff exponentiel avec un petit jitter
                 if attempt < max_retries:
                     delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
                     time.sleep(delay)
@@ -176,7 +148,6 @@ def _call_mistral(messages: List[Dict[str, str]], api_key: str) -> str:
             data = r.json()
             return data["choices"][0]["message"]["content"]
         except Exception as e:
-            # si dernière tentative, on remonte l'erreur, sinon on retente
             if attempt == max_retries:
                 return f"⚠️ API error: {e}"
             else:
@@ -187,9 +158,9 @@ def _call_mistral(messages: List[Dict[str, str]], api_key: str) -> str:
 
 def _init_state():
     if "agent_messages" not in st.session_state:
-        st.session_state.agent_messages = []  # list[{"role": "user"|"assistant", "content": str}]
+        st.session_state.agent_messages = []
     if "agent_docs" not in st.session_state:
-        st.session_state.agent_docs = {}      # dict[file_name -> text]
+        st.session_state.agent_docs = {}
     if "agent_query_input" not in st.session_state:
         st.session_state.agent_query_input = ""
     if "agent_search_mode" not in st.session_state:
@@ -197,14 +168,12 @@ def _init_state():
 
 # ---------- Search helpers ----------
 def _find_matches(text: str, pattern: re.Pattern, window: int = 80) -> List[str]:
-    """Return list of HTML snippets with <mark> around matches."""
     snippets = []
     for m in pattern.finditer(text):
         start, end = m.start(), m.end()
         s0 = max(0, start - window)
         e0 = min(len(text), end + window)
         snippet = text[s0:e0]
-        # Build HTML with escaped segments and <mark> around matches
         out, last = [], 0
         for mm in pattern.finditer(snippet):
             a, b = mm.start(), mm.end()
@@ -212,7 +181,6 @@ def _find_matches(text: str, pattern: re.Pattern, window: int = 80) -> List[str]
             out.append(f"<mark>{escape(snippet[a:b])}</mark>")
             last = b
         out.append(escape(snippet[last:]))
-        # Add ellipses if truncated
         prefix = "…" if s0 > 0 else ""
         suffix = "…" if e0 < len(text) else ""
         snippets.append(f'<div class="snippet">{prefix}{ "".join(out) }{suffix}</div>')
@@ -225,7 +193,6 @@ def _search_keywords(query: str, docs: Dict[str, str], file_filter: str) -> Dict
     try:
         pattern = re.compile(query, re.IGNORECASE)
     except re.error:
-        # Fallback: escape as literal if regex invalid
         pattern = re.compile(re.escape(query), re.IGNORECASE)
     items = docs.items()
     if file_filter and file_filter != "All files":
@@ -235,20 +202,18 @@ def _search_keywords(query: str, docs: Dict[str, str], file_filter: str) -> Dict
             continue
         snippets = _find_matches(body, pattern, window=80)
         if snippets:
-            results[fname] = snippets[:10]  # limit to 10 per file
+            results[fname] = snippets[:10]
     return results
 
 def _ai_assist_summary(query: str, results: Dict[str, List[str]], api_key: str) -> str:
-    """Ask the model to summarize best evidence from snippets."""
     if not results:
         return ""
-    # Flatten a small set of top snippets across files
     flat = []
     for f, ss in results.items():
         for s in ss[:3]:
-            text_only = re.sub("<.*?>", "", s)  # strip HTML for the model
+            text_only = re.sub("<.*?>", "", s)
             flat.append((f, text_only))
-    flat = flat[:5]  # cap
+    flat = flat[:5]
     snippet_block = "\n".join([f"- [{f}] {t}" for f, t in flat])
     messages = [
         {"role": "system", "content": "You summarize only using the provided snippets. If unsure, say you cannot find it."},
@@ -266,17 +231,17 @@ def render_agent():
 
     left, right = st.columns([1.05, 1.25])
 
-    # ----- LEFT: Ask the agent (short form) -----
+    # ----- LEFT: Ask the agent -----
     with left:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.write("----")
         with st.form("ask_form", clear_on_submit=True):
             q = st.text_input("Ask the agent", value=st.session_state.agent_query_input, placeholder="Ask something about your documents…")
             sent = st.form_submit_button("Send", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.write("----")
 
     # ----- RIGHT: Docs + actions + search -----
     with right:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.write("----")
 
         uploads = st.file_uploader(
             "Drag & drop files here",
@@ -305,7 +270,6 @@ def render_agent():
         st.markdown("---")
         st.markdown("**Search in docs**")
 
-        # Build file filter options
         file_opts = ["All files"] + list(st.session_state.agent_docs.keys())
 
         with st.form("search_form"):
@@ -314,7 +278,6 @@ def render_agent():
             s_file = st.selectbox("File filter", file_opts, index=0)
             s_submit = st.form_submit_button("Search", use_container_width=True)
 
-        # Results inside the card
         if s_submit and s_query.strip():
             results = _search_keywords(s_query, st.session_state.agent_docs, s_file)
             if not results:
@@ -331,17 +294,15 @@ def render_agent():
                     for snip in snippets:
                         st.markdown(snip, unsafe_allow_html=True)
 
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.write("----")
 
-    # ----- Handle Ask form submission (build answer, no duplicate render) -----
+    # ----- Handle Ask form submission -----
     if 'sent' in locals() and sent and q.strip():
         user_prompt = q.strip()
-        st.session_state.agent_query_input = ""  # reset field
+        st.session_state.agent_query_input = ""
 
-        # Append user message
         st.session_state.agent_messages.append({"role": "user", "content": user_prompt})
 
-        # Build context & call model
         context_block = _build_context_from_docs(st.session_state.agent_docs)
         messages: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         if context_block:
@@ -352,21 +313,20 @@ def render_agent():
         history = st.session_state.agent_messages[-(2 * HISTORY_TURNS):]
         messages.extend(history)
 
-        # Compute answer (no immediate render to avoid duplicates)
         with st.spinner("Thinking..."):
             answer = _call_mistral(messages, api_key=api_key)
 
         st.session_state.agent_messages.append({"role": "assistant", "content": answer})
         st.rerun()
 
-    # ----- Transcript under the left column -----
+    # ----- Transcript -----
     with left:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.write("----")
         st.markdown("**Conversation**")
         for msg in st.session_state.agent_messages[-2 * HISTORY_TURNS:]:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.write("----")
 
 # Public render function expected by app.py
 def render():
