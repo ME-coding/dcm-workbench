@@ -752,42 +752,204 @@ def render_central_banks():
 
     # Removed RSS table of central banks news per request
 
+# =======================================================
+# Deal Watch
+# =======================================================
+
 def render_deal_watch():
-    from datetime import datetime  # utilisé pour le nom du fichier
+    from datetime import datetime  # utilisé pour l'affichage horaire local
+    from html import unescape as _unescape
 
     st.markdown("#### Deal Tracker")
-    st.caption("Auto-pulls bond issuance press releases via RSS (editable), filters by keywords, and lets you export.")
+    st.caption("Auto-pulls bond issuance press releases via RSS (editable), filters by keywords, and shows latest issuers.")
 
+    # --- 6 deal sources par défaut (éditables) ---
     deal_sources = {
         "GlobeNewswire — Prospectus/Announcement": "https://www.globenewswire.com/RssFeed/subjectcode/63-Prospectus%202fAnnouncement%20Of%20Prospectus/feedTitle/GlobeNewswire%20-%20Prospectus%2C%20Announcement%20Of%20Prospectus",
         "GlobeNewswire — Press Releases": "https://www.globenewswire.com/RssFeed/subjectcode/72-Press%20Releases/feedTitle/GlobeNewswire%20-%20Press%20Releases",
         "PR Newswire — All": "https://www.prnewswire.com/rss/news-releases-list.rss",
+        "PR Newswire — Financial Services": "https://www.prnewswire.com/rss/financial-services/all-financial-services-news.rss",
+        "Euronext — News": "https://live.euronext.com/en/rss_feed/news",
+        "London Stock Exchange — RNS (All)": "https://www.londonstockexchange.com/exchange/feeds/rss/news.xml",
     }
-    with st.expander("Edit deal feeds", expanded=False):
-        deal_sources = _sources_editor(deal_sources, key="deal_sources_editor")
-
-    # --- Hidden keywords (not displayed) ---
-    default_kw = r"bond|notes|covered|green bond|subordinated|hybrid|AT1|Tier 2|convertible|syndicated|midswap|spread|coupon|maturity|issuance"
-    kw = default_kw  # pas d'UI — on garde les filtres cachés
+    # --- Filtres (cachés) ---
+    default_kw = r"bond|notes|covered|green bond|sustainability|subordinated|hybrid|AT1|Tier 2|senior|convertible|syndicated|benchmark|tap|midswap|spread|coupon|maturity|issuance|new issue|priced|pricing|launch"
+    kw = default_kw  # pas d'UI
 
     limit = st.number_input("Items per feed", min_value=5, max_value=50, value=15, step=5)
 
     urls = list(deal_sources.values())
     df = fetch_rss(urls, limit_per_feed=int(limit)) if urls else pd.DataFrame(columns=["source", "title", "link", "published"])
+
+    # ---------- Banques : dictionnaire de synonymes -> libellé canonique ----------
+    BANK_SYNONYMS = {
+        "J.P. Morgan": ["J.P. Morgan", "JP Morgan", "JPMorgan"],
+        "Morgan Stanley": ["Morgan Stanley"],
+        "Goldman Sachs & Co. LLC": ["Goldman Sachs & Co. LLC"],
+        "Goldman Sachs": ["Goldman Sachs"],
+        "BofA Securities": ["BofA Securities", "BofA", "Bank of America"],
+        "Citigroup": ["Citigroup", "Citi"],
+        "Barclays": ["Barclays", "Barclays Bank PLC"],
+        "BNP Paribas": ["BNP Paribas"],
+        "Société Générale": ["Société Générale", "Societe Generale"],
+        "Crédit Agricole CIB": ["Crédit Agricole CIB", "Credit Agricole CIB"],
+        "Crédit Agricole": ["Crédit Agricole", "Credit Agricole"],
+        "Natixis": ["Natixis"],
+        "HSBC": ["HSBC"],
+        "Deutsche Bank": ["Deutsche Bank"],
+        "UBS": ["UBS"],
+        "Wells Fargo": ["Wells Fargo"],
+        "Jefferies": ["Jefferies"],
+        "RBC Capital Markets": ["RBC Capital Markets", "RBC"],
+        "Scotiabank": ["Scotiabank"],
+        "TD Securities": ["TD Securities"],
+        "Mizuho": ["Mizuho"],
+        "SMBC Nikko": ["SMBC Nikko", "SMBC"],
+        "Nomura": ["Nomura"],
+        "ING": ["ING", "ING Bank"],
+        "Intesa Sanpaolo": ["Intesa Sanpaolo"],
+        "UniCredit": ["UniCredit"],
+        "Santander": ["Santander", "Banco Santander"],
+        "BBVA": ["BBVA"],
+    }
+    # mapping "synonyme -> canonique"
+    ALT_TO_CANON = {}
+    for canon, alts in BANK_SYNONYMS.items():
+        for a in alts:
+            ALT_TO_CANON[a.lower()] = canon
+
+    # Regex robuste: mots entiers + espaces variables, évite "ing" dans "pricing"
+    def _alts_to_regex_parts(alts: List[str]) -> List[str]:
+        parts = []
+        for a in alts:
+            esc = re.escape(a)
+            esc = esc.replace(r"\ ", r"\s+")  # tolère espaces multiples
+            parts.append(esc)
+        return parts
+    BANK_PATTERN = re.compile(
+        r"(?<![A-Za-z])(?:%s)(?![A-Za-z])" % "|".join(
+            _alts_to_regex_parts([k for sub in BANK_SYNONYMS.values() for k in sub])
+        ),
+        re.IGNORECASE,
+    )
+
+    def _extract_banks_from_text(text: str) -> list[str]:
+        hits = []
+        for m in BANK_PATTERN.finditer(text):
+            canon = ALT_TO_CANON.get(m.group(0).lower())
+            if canon:
+                hits.append(canon)
+        # unique en conservant l'ordre d'apparition
+        return list(dict.fromkeys(hits))
+
+    # Récupération du HTML de l'article et conversion en texte brut
+    if "deal_article_cache" not in st.session_state:
+        st.session_state.deal_article_cache = {}
+    def _fetch_article_plaintext(url: str) -> str:
+        # cache simple
+        cache = st.session_state.deal_article_cache
+        if url in cache:
+            return cache[url]
+        if 'requests' in globals() and requests is not None:
+            try:
+                hdr = {"User-Agent": "Mozilla/5.0 (DealTracker/1.0)"}
+                r = requests.get(url, timeout=8, headers=hdr)
+                r.raise_for_status()
+                html = r.text
+                # retire scripts/styles puis tags
+                html = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
+                html = re.sub(r"(?is)<style.*?>.*?</style>", " ", html)
+                text = _unescape(re.sub(r"(?s)<[^>]+>", " ", html))
+                text = re.sub(r"\s+", " ", text).strip()
+            except Exception:
+                text = ""
+        else:
+            text = ""
+        cache[url] = text
+        return text
+
+    def _extract_issuer(title: str) -> str | None:
+        t = re.sub(r"\s+", " ", title).strip()
+        # supprime les tickers entre parenthèses
+        t = re.sub(r"\((?:NASDAQ|NYSE|EPA|LSE|TSX|SIX|FWB|XETRA|HKEX|ASX|BME)[^)]*\)", "", t, flags=re.IGNORECASE)
+        m = re.search(r"^(.*?)(?:\s+)(announces|prices?|launches|issues?|offers?|files|to issue|to offer)\b", t, flags=re.IGNORECASE)
+        cand = m.group(1).strip(" -—:;,.") if m else None
+        if not cand:
+            cand = t.split(":")[0].split("—")[0].split("-")[0].strip()
+        if cand and len(cand.split()) <= 8 and not cand.lower().startswith(("press release", "company", "the ")):
+            return cand
+        return None
+
+    def _join_and(names: list[str]) -> str:
+        if not names:
+            return ""
+        if len(names) == 1:
+            return names[0]
+        return ", ".join(names[:-1]) + " and " + names[-1]
+
     if not df.empty:
+        # Filtre mots-clés
         mask = df["title"].str.contains(kw, case=False, na=False, regex=True)
         df = df[mask].copy()
+
         df["Time"] = df["published"].dt.tz_convert("Europe/Paris").dt.strftime("%Y-%m-%d %H:%M")
-        view = df[["Time", "source", "title", "link"]].rename(columns={"source":"Source","title":"Title","link":"Link"})
+        df["Issuer"] = df["title"].apply(_extract_issuer)
+
+        # 1) banques depuis le titre (souvent vide)
+        df["Banks_title"] = df["title"].apply(_extract_banks_from_text)
+
+        # 2) banques depuis l'article (limite de requêtes pour rester léger)
+        banks_from_page = []
+        max_fetch = 12  # on limite le nombre de pages à récupérer
+        fetched = 0
+        for _, row in df.sort_values("published", ascending=False).iterrows():
+            if fetched >= max_fetch:
+                banks_from_page.append([])
+                continue
+            text = _fetch_article_plaintext(row.get("link", ""))
+            banks_from_page.append(_extract_banks_from_text(text))
+            fetched += 1
+        # réaligne sur l'index courant
+        df_sorted = df.sort_values("published", ascending=False).copy()
+        df_sorted["Banks_page"] = banks_from_page
+        df = df_sorted.sort_index()
+
+        # Fusionne banques titre + page
+        def _merge_banks(row) -> list[str]:
+            seen = {}
+            for b in (row.get("Banks_title", []) or []) + (row.get("Banks_page", []) or []):
+                seen[b] = True
+            # tri alpha pour stabilité
+            return sorted(seen.keys(), key=lambda x: x.lower())
+
+        df["Banks"] = df.apply(_merge_banks, axis=1)
+
+        # Vue table cliquable (conserve l'existant)
+        view = df[["Time", "source", "title", "link"]].rename(columns={"source": "Source", "title": "Title", "link": "Link"})
         _render_clickable_table(view)
-        st.download_button(
-            "Download deals list (CSV)",
-            data=view.to_csv(index=False).encode("utf-8"),
-            file_name=f"deal_tracker_{datetime.now():%Y%m%d_%H%M}.csv",
-            mime="text/csv",
-        )
+
+        # ---------- Nouveau : panneau des derniers émetteurs + banques détectées ----------
+        issuers_lines = []
+        for _, row in df.sort_values("published", ascending=False).iterrows():
+            issuer = row.get("Issuer")
+            banks = row.get("Banks") or []
+            if issuer:
+                if banks:
+                    issuers_lines.append(f"{issuer} ({_join_and(banks)})")
+                else:
+                    issuers_lines.append(issuer)
+        issuers_lines = list(dict.fromkeys(issuers_lines))  # unique, ordre conservé
+
+        if issuers_lines:
+            st.markdown("**Latest issuers detected**")
+            st.markdown("- " + "\n- ".join(issuers_lines[:25]))
+        else:
+            st.info("No clear issuer names detected in headlines (try editing sources or keywords).")
+
+        # (toujours pas de bouton CSV)
     else:
         st.info("No deal headlines fetched yet. Edit/add sources if needed.")
+
 
 # =======================================================
 # Main render() with hard guards (prevents safe_tab warnings)
