@@ -150,7 +150,7 @@ def tool_termsheet():
                                       value=date.today().replace(year=date.today().year + 5),
                                       key="ts_maturity_date")
     with c3:
-        # Remplacement de "Coupon (text)" par coupon rate + frequency
+        # Coupon rate + frequency (utilisés pour le calcul de yield et pour {{coupon}})
         coupon_rate = st.number_input("Coupon rate (% p.a.)", min_value=0.0, value=4.00, step=0.10,
                                       format="%.4f", key="ts_coupon_rate")
         coupon_freq_label = st.selectbox("Coupon frequency", ["Annual", "Semi-annual", "Quarterly"],
@@ -172,7 +172,6 @@ def tool_termsheet():
 
     st.markdown("---")
     # === Calcul automatique de {{yield}} à partir du clean price, coupon rate & frequency ===
-    auto_yield = True  # imposé par le besoin : on calcule le yield depuis ces paramètres
     years_to_mty = max(0.0, (maturity_date - issue_date).days / 365.0)
     computed_yield = _ytm_from_price(
         clean_price_pct=clean_price,
@@ -199,7 +198,7 @@ def tool_termsheet():
         "issue_amount": f"{currency.strip() or 'EUR'} {issue_amount:,.0f}".replace(",", " "),
         "trade_date": trade_date.strftime("%d %b %Y"),
         "maturity_date": maturity_date.strftime("%d %b %Y"),
-        "coupon": coupon_str,                      # << remplace l’ancienne saisie texte
+        "coupon": coupon_str,                      # << injecté dans {{coupon}}
         "use_of_proceeds": use.strip(),
         "issue_date": issue_date.strftime("%d %b %Y"),
         "clean_price": f"{clean_price:.2f}%",
@@ -229,103 +228,9 @@ def tool_termsheet():
         except Exception as e:
             st.error(f"Word generation failed: {e}")
 
-
 # =========================
-# TOOL 2 — Fees & Net Proceeds (simplified)
+# TOOL 2 — Amortization Builder (interactive)
 # =========================
-
-def _waterfall_data(gross: float, fees_total: float, other_costs: float) -> pd.DataFrame:
-    """Prepare a true waterfall dataset with Start/End for each step."""
-    steps = [
-        {"Step": "Gross proceeds", "Type": "Base", "Amount": gross},
-        {"Step": "Fees (total)", "Type": "Decrease", "Amount": -fees_total},
-        {"Step": "Other costs", "Type": "Decrease", "Amount": -other_costs},
-    ]
-    df = pd.DataFrame(steps)
-    df["Cumulative"] = df["Amount"].cumsum()
-    df["Start"] = df["Cumulative"] - df["Amount"]
-    df["End"] = df["Cumulative"]
-
-    # Terminal "Net" bar
-    net = gross - fees_total - other_costs
-    df_net = pd.DataFrame([{
-        "Step": "Net proceeds", "Type": "Result",
-        "Amount": net, "Cumulative": net, "Start": 0.0, "End": net
-    }])
-    return pd.concat([df, df_net], ignore_index=True)
-
-def tool_fees():
-    st.markdown("#### Fees & Net Proceeds (simplified)")
-
-    st.caption(
-        "Estimate **net proceeds** after underwriting fees and fixed costs. "
-        "Waterfall shows Gross → Net."
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        notional = st.number_input("Notional", min_value=100000.0, value=500_000_000.0,
-                                   step=1_000_000.0, format="%.2f", key="fees_notional")
-    with c2:
-        issue_px = st.number_input("Issue price (% of par)", min_value=0.0, value=99.50,
-                                   step=0.10, format="%.2f", key="fees_issue_px")
-    with c3:
-        total_bps = st.number_input("Total fees (bps)", min_value=0.0, value=30.0,
-                                    step=0.5, format="%.1f", key="fees_total_bps")
-    with c4:
-        other_costs = st.number_input("Other costs (fixed)", min_value=0.0, value=250_000.0,
-                                      step=50_000.0, format="%.2f", key="fees_other_costs")
-
-    gross = notional * issue_px / 100.0
-    fees_amount = notional * (total_bps / 10000.0)
-    net = gross - fees_amount - other_costs
-
-    k1, k2, k3 = st.columns(3)
-    with k1:
-        st.metric("Gross proceeds", f"{gross:,.2f}")
-    with k2:
-        st.metric("Total fees", f"{fees_amount:,.2f}", delta=f"{total_bps:.1f} bps")
-    with k3:
-        st.metric("Net proceeds", f"{net:,.2f}")
-
-    wf_df = _waterfall_data(gross, fees_amount, other_costs)
-    color_scale = alt.Scale(domain=["Base", "Decrease", "Result"],
-                            range=["#6B7280", "#EF4444", "#10B981"])
-
-    bars = alt.Chart(wf_df).mark_bar().encode(
-        x=alt.X("Step:N", sort=None, title=""),
-        y=alt.Y("Start:Q", title="Amount"),
-        y2="End:Q",
-        color=alt.Color("Type:N", scale=color_scale, legend=alt.Legend(title="")),
-        tooltip=[
-            alt.Tooltip("Step:N"),
-            alt.Tooltip("Amount:Q", format=",.2f"),
-            alt.Tooltip("End:Q", title="Post-step", format=",.2f"),
-        ],
-    )
-
-    labels = alt.Chart(wf_df).mark_text(dy=-6).encode(
-        x=alt.X("Step:N", sort=None),
-        y=alt.Y("End:Q"),
-        text=alt.Text("End:Q", format=",.0f"),
-        color=alt.value("#111827"),
-    )
-
-    st.altair_chart((bars + labels).properties(height=340, title="Gross → Net Proceeds: Waterfall"),
-                    use_container_width=True)
-
-    out_df = pd.DataFrame({
-        "Component": ["Gross proceeds", "Total fees", "Other costs", "Net proceeds"],
-        "Amount": [gross, fees_amount, other_costs, net],
-    })
-    st.download_button("Download fees breakdown (CSV)", data=out_df.to_csv(index=False).encode("utf-8"),
-                       file_name="fees_breakdown.csv", mime="text/csv", key="fees_dl_csv")
-
-
-# =========================
-# TOOL 3 — Amortization Builder (improved chart)
-# =========================
-
 def tool_amortization():
     st.markdown("#### Amortization Builder")
 
@@ -358,12 +263,14 @@ def tool_amortization():
         "Outstanding (end)": "{:,.2f}",
     }), use_container_width=True)
 
-    # ---- Improved chart: Stacked bars (Principal + Interest) + line (Outstanding end)
-    bars_df = df.melt(id_vars=["Period", "Time (years)", "Outstanding (end)"],
-                      value_vars=["Principal", "Interest/Coupon"],
-                      var_name="Component", value_name="Amount")
+    # ---- Interactive chart: Stacked bars + line (zoom/pan only)
+    bars_df = df.melt(
+        id_vars=["Period", "Time (years)", "Outstanding (end)"],
+        value_vars=["Principal", "Interest/Coupon"],
+        var_name="Component", value_name="Amount"
+    )
 
-    bar = alt.Chart(bars_df).mark_bar().encode(
+    bars = alt.Chart(bars_df).mark_bar().encode(
         x=alt.X("Time (years):Q", title="Time (years)"),
         y=alt.Y("Amount:Q", stack="zero", title="Cashflow"),
         color=alt.Color("Component:N", sort=["Interest/Coupon", "Principal"]),
@@ -385,10 +292,11 @@ def tool_amortization():
         ],
     )
 
-    chart = alt.layer(bar, line).resolve_scale(y="independent").properties(
-        height=340,
+    chart = alt.layer(bars, line).resolve_scale(y="independent").properties(
+        height=360,
         title="Cashflows (stacked) & Outstanding profile"
-    )
+    ).interactive()  # active zoom & pan natif
+
     st.altair_chart(chart, use_container_width=True)
 
     st.download_button(
@@ -398,7 +306,6 @@ def tool_amortization():
         mime="text/csv",
         key="amort_dl_csv",
     )
-
 
 # =========================
 # Main render()
@@ -410,13 +317,10 @@ def render():
 
     tabs = st.tabs([
         "Term Sheet Builder",
-        "Fees & Net Proceeds",
         "Amortization Builder",
     ])
 
     with tabs[0]:
         tool_termsheet()
     with tabs[1]:
-        tool_fees()
-    with tabs[2]:
         tool_amortization()

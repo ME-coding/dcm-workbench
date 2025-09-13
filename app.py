@@ -221,9 +221,7 @@ if section == "Home Page":
         if st.button("Pricer", type="secondary", key="home_sd_pricer"):
             _goto("Structuring Desk", "Pricer")
         st.caption("Multi-product pricing tools and analytics")
-        if st.button("Data Visualisation", type="secondary", key="home_sd_dataviz"):
-            _goto("Structuring Desk", "Data Visualisation")
-        st.caption("Market curves, spreads, and sector visualisations")
+        # (removed Data Visualisation button since dataviz.py was deleted)
         if st.button("Tools", type="secondary", key="home_sd_tools"):
             _goto("Structuring Desk", "Tools")
         st.caption("Utilities for term sheets, fees, amortization")
@@ -247,11 +245,10 @@ elif section == "Structuring Desk":
     _render_hero_from(hero_struct_path)
 
     st.title("Structuring Desk")
-    tab_pricer, tab_dataviz, tab_tools = st.tabs(["Pricer", "Data Visualisation", "Tools"])
+    # Removed "Data Visualisation" tab
+    tab_pricer, tab_tools = st.tabs(["Pricer", "Tools"])
     with tab_pricer:
         safe_tab("Structuring.pricer", "Structuring Desk — Pricer")
-    with tab_dataviz:
-        safe_tab("Structuring.dataviz", "Structuring Desk — Data Visualisation")
     with tab_tools:
         safe_tab("Structuring.tools", "Structuring Desk — Tools")
     _maybe_select_pending_tab()
