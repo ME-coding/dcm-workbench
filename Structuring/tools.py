@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import date
+import io
+import os
+from typing import Dict, Any, Optional
+
 import pandas as pd
 import streamlit as st
 import altair as alt
-
 
 # =========================
 # Helpers (schedules)
@@ -64,83 +67,171 @@ def build_amortization(notional: float, rate_annual: float, years: float, freq: 
         ],
     )
 
-
 # =========================
 # TOOL 1 — Term Sheet Builder
 # =========================
 
+# --- Optional deps (docxtpl) ---
+try:
+    from docxtpl import DocxTemplate
+    DOCTPL_OK = True
+except Exception:
+    DOCTPL_OK = False
+
+# --- Helper: render Word from template with context ---
+def _render_termsheet_docx(template_path: str, context: Dict[str, Any]) -> bytes:
+    if not DOCTPL_OK:
+        raise RuntimeError("docxtpl not installed (pip install docxtpl)")
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Template not found: {template_path}")
+    doc = DocxTemplate(template_path)
+    bio = io.BytesIO()
+    doc.render(context)
+    doc.save(bio)
+    return bio.getvalue()
+
+# --- Helper: compute yield-to-maturity (annualized) from clean price ---
+def _ytm_from_price(clean_price_pct: float, coupon_rate_pct: float, years_to_mty: float, freq: int = 2, redemption: float = 100.0) -> float:
+    """
+    Approximate YTM solving price = PV(coupons + redemption).
+    clean_price_pct: clean price as % of par (e.g., 99.50)
+    coupon_rate_pct: annual coupon rate in % (e.g., 4.00)
+    years_to_mty: years from settlement to maturity (float)
+    freq: coupons per year (1, 2, 4)
+    returns annualized YTM in %
+    """
+    if years_to_mty <= 0 or freq <= 0:
+        return 0.0
+    C = coupon_rate_pct / 100.0 * 100.0 / freq
+    N = max(1, int(round(years_to_mty * freq)))
+    P = clean_price_pct  # price per 100 par (clean)
+    # Initial guess
+    y = max(0.0001, (coupon_rate_pct / max(0.01, clean_price_pct)) + 0.01)
+    r = y / freq
+    for _ in range(50):
+        pv = 0.0
+        dp = 0.0
+        for t in range(1, N + 1):
+            disc = (1.0 + r) ** t
+            pv += C / disc
+            dp -= t * C / disc / (1.0 + r)
+        pv += redemption / ((1.0 + r) ** N)
+        dp -= N * redemption / ((1.0 + r) ** (N + 1))
+        f = pv - P
+        if abs(f) < 1e-8 or dp == 0:
+            break
+        r -= f / dp
+        r = max(-0.9999, min(r, 1.0))
+    y_annual = (1.0 + r) ** freq - 1.0
+    return max(-99.0, min(y_annual * 100.0, 999.0))
+
 def tool_termsheet():
     st.markdown("#### Term Sheet Builder")
 
+    # === Inputs: uniquement ceux présents dans ton Word ===
     c1, c2, c3 = st.columns(3)
     with c1:
         issuer = st.text_input("Issuer", value="Sample Issuer SA", key="ts_issuer")
-        guarantor = st.text_input("Guarantor (if any)", value="", key="ts_guarantor")
+        guarantor = st.text_input("Guarantor", value="", key="ts_guarantor")
         currency = st.text_input("Currency", value="EUR", key="ts_currency")
-        format_ = st.selectbox("Format", sorted(["Reg S", "144A/Reg S", "Domestic"]), index=1, key="ts_format")
+        rating = st.text_input("Rating", value="", key="ts_rating")
         status = st.selectbox(
             "Status",
-            sorted(["Senior Unsecured", "Senior Preferred", "Senior Non-Preferred", "Subordinated", "Tier 2", "AT1"]),
-            key="ts_status",
+            ["Senior Unsecured", "Senior Preferred", "Senior Non-Preferred", "Subordinated", "Tier 2", "AT1"],
+            index=0, key="ts_status"
         )
     with c2:
-        notional = st.number_input("Notional", min_value=100000.0, value=500_000_000.0,
-                                   step=1_000_000.0, format="%.2f", key="ts_notional")
-        issue_px = st.number_input("Issue price (% of par)", min_value=0.0, value=99.50,
-                                   step=0.10, format="%.2f", key="ts_issue_px")
-        redemption_px = st.number_input("Redemption price (% of par)", min_value=0.0, value=100.00,
-                                        step=0.10, format="%.2f", key="ts_redemption_px")
-        coupon_type = st.selectbox("Coupon type", sorted(["Fixed", "Floating (FRN)", "Zero-Coupon"]), key="ts_coupon_type")
-        coupon = st.text_input("Coupon / Ref + spread", value="4.000% annual (Act/Act, semi-annual)", key="ts_coupon")
+        governing_law = st.text_input("Governing law", value="English law", key="ts_law")
+        issue_amount = st.number_input("Issue amount (notional)", min_value=100000.0, value=500_000_000.0,
+                                       step=1_000_000.0, format="%.2f", key="ts_issue_amount")
+        trade_date = st.date_input("Trade date", value=date.today(), key="ts_trade_date")
+        issue_date = st.date_input("Issue date", value=date.today(), key="ts_issue_date")
+        maturity_date = st.date_input("Maturity date",
+                                      value=date.today().replace(year=date.today().year + 5),
+                                      key="ts_maturity_date")
     with c3:
-        maturity = st.date_input(
-            "Maturity date",
-            value=date.today().replace(year=date.today().year + 5),
-            key="ts_maturity",
-        )
-        denom = st.text_input("Denomination", value="€100,000 + €100,000", key="ts_denom")
-        listing = st.text_input("Listing (if any)", value="LuxSE", key="ts_listing")
-        law = st.text_input("Governing law", value="English law", key="ts_law")
+        # Remplacement de "Coupon (text)" par coupon rate + frequency
+        coupon_rate = st.number_input("Coupon rate (% p.a.)", min_value=0.0, value=4.00, step=0.10,
+                                      format="%.4f", key="ts_coupon_rate")
+        coupon_freq_label = st.selectbox("Coupon frequency", ["Annual", "Semi-annual", "Quarterly"],
+                                         index=1, key="ts_coupon_freq")
+        coupon_freq = {"Annual": 1, "Semi-annual": 2, "Quarterly": 4}[coupon_freq_label]
+
         use = st.text_area("Use of proceeds", value="General corporate purposes.", key="ts_use")
-        sustainability = st.checkbox("Sustainability-linked features", value=False, key="ts_sust")
+        clean_price = st.number_input("Clean price (% of par)", min_value=0.0, value=99.50, step=0.10,
+                                      format="%.2f", key="ts_clean")
+        accrued = st.number_input("Accrued (% of par)", min_value=0.0, value=0.50, step=0.10,
+                                  format="%.2f", key="ts_accrued")
+        issue_price = st.number_input("Issue price (% of par)", min_value=0.0, value=100.00, step=0.10,
+                                      format="%.2f", key="ts_issue_px")
+        joint_lead_managers = st.text_input(
+            "Joint Lead Managers (semicolon- or comma-separated)",
+            value="GS; BNP Paribas; J.P. Morgan",
+            key="ts_jlm"
+        )
 
-    covenants = st.text_area(
-        "Covenants / Optionality (summary)",
-        value="Change of Control put @ 101%. Make-whole call prior to Maturity. Standard negative pledge.",
-        key="ts_cov",
-    )
-
-    # Build the markdown
-    lines = []
-    lines.append(f"# Indicative Terms & Conditions")
-    lines.append("")
-    lines.append(f"**Issuer:** {issuer}")
-    if guarantor.strip():
-        lines.append(f"**Guarantor:** {guarantor}")
-    lines.append(f"**Currency / Notional:** {currency} {notional:,.0f}")
-    lines.append(f"**Format:** {format_}")
-    lines.append(f"**Status:** {status}")
-    lines.append(f"**Maturity:** {maturity.strftime('%d %b %Y')}")
-    lines.append(f"**Issue / Redemption Price:** {issue_px:.2f}% / {redemption_px:.2f}% of par")
-    lines.append(f"**Coupon:** {coupon_type} — {coupon}")
-    lines.append(f"**Denomination:** {denom}")
-    lines.append(f"**Listing:** {listing}")
-    lines.append(f"**Governing Law:** {law}")
-    if sustainability:
-        lines.append("**Sustainability:** Applicable (see KPI framework and step up mechanics).")
-    lines.append(f"**Use of Proceeds:** {use}")
-    lines.append(f"**Covenants / Optionality:** {covenants}")
-    lines.append("")
-    lines.append("_This term sheet is for discussion purposes only and does not constitute an offer or solicitation._")
-
-    # Editable area + copy-friendly code block (keeps Streamlit's native 'Copy' button)
     st.markdown("---")
-    ts_text = st.text_area("Generated Term Sheet (editable)", value="\n".join(lines), height=350, key="ts_textarea")
-    st.code(ts_text, language="markdown")
+    # === Calcul automatique de {{yield}} à partir du clean price, coupon rate & frequency ===
+    auto_yield = True  # imposé par le besoin : on calcule le yield depuis ces paramètres
+    years_to_mty = max(0.0, (maturity_date - issue_date).days / 365.0)
+    computed_yield = _ytm_from_price(
+        clean_price_pct=clean_price,
+        coupon_rate_pct=coupon_rate,
+        years_to_mty=years_to_mty,
+        freq=coupon_freq,
+        redemption=100.0
+    )
+    yield_display = f"{computed_yield:.2f}%"
+
+    # Construire la chaîne {{coupon}} depuis rate + frequency
+    coupon_str = f"{coupon_rate:.3f}% ({coupon_freq_label})"
+
+    # === Contexte pour docxtpl (clefs EXACTEMENT celles de ton .docx) ===
+    context: Dict[str, Any] = {
+        "issuer": issuer.strip(),
+        "guarantor": guarantor.strip(),
+        "currency": currency.strip() or "EUR",
+        "rating": rating.strip(),
+        "joint_lead_managers": joint_lead_managers.strip(),
+        "status": status,
+        "governing_law": governing_law.strip(),
+        "governing_law ": governing_law.strip(),  # sécurité si ta balise Word a un espace final
+        "issue_amount": f"{currency.strip() or 'EUR'} {issue_amount:,.0f}".replace(",", " "),
+        "trade_date": trade_date.strftime("%d %b %Y"),
+        "maturity_date": maturity_date.strftime("%d %b %Y"),
+        "coupon": coupon_str,                      # << remplace l’ancienne saisie texte
+        "use_of_proceeds": use.strip(),
+        "issue_date": issue_date.strftime("%d %b %Y"),
+        "clean_price": f"{clean_price:.2f}%",
+        "accrued": f"{accrued:.2f}%",
+        "issue_price": f"{issue_price:.2f}%",
+        "yield": yield_display,                    # calculé automatiquement
+        "today": date.today().strftime("%d %b %Y"),
+    }
+
+    # === Génération Word ===
+    template_path = r"C:\Users\Maxime\Dev\DCM_Workbench\Library\Termsheet-Example.docx"
+    if not DOCTPL_OK:
+        st.error("`docxtpl` n'est pas installé. Installe-le avec: `pip install docxtpl`")
+
+    if st.button("Generate Word Termsheet", disabled=not DOCTPL_OK):
+        try:
+            docx_bytes = _render_termsheet_docx(template_path, context)
+            st.download_button(
+                "Download Word Termsheet",
+                data=docx_bytes,
+                file_name=f"Termsheet_{issuer.replace(' ', '_')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="ts_docx_download",
+            )
+        except FileNotFoundError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error(f"Word generation failed: {e}")
 
 
 # =========================
-# TOOL — Fees & Net Proceeds (simplified, with explanation + clearer chart)
+# TOOL 2 — Fees & Net Proceeds (simplified)
 # =========================
 
 def _waterfall_data(gross: float, fees_total: float, other_costs: float) -> pd.DataFrame:
@@ -163,15 +254,12 @@ def _waterfall_data(gross: float, fees_total: float, other_costs: float) -> pd.D
     }])
     return pd.concat([df, df_net], ignore_index=True)
 
-
 def tool_fees():
     st.markdown("#### Fees & Net Proceeds (simplified)")
 
-    # Short explanation (why this tool & how to read the chart)
     st.caption(
-        "This tool estimates **net proceeds** after underwriting fees and fixed costs. "
-        "The **waterfall** shows how Gross proceeds step down to Net: each red bar is a deduction; "
-        "the green bar is the final Net amount."
+        "Estimate **net proceeds** after underwriting fees and fixed costs. "
+        "Waterfall shows Gross → Net."
     )
 
     c1, c2, c3, c4 = st.columns(4)
@@ -200,9 +288,7 @@ def tool_fees():
     with k3:
         st.metric("Net proceeds", f"{net:,.2f}")
 
-    # Waterfall chart (cleaner & annotated)
     wf_df = _waterfall_data(gross, fees_amount, other_costs)
-
     color_scale = alt.Scale(domain=["Base", "Decrease", "Result"],
                             range=["#6B7280", "#EF4444", "#10B981"])
 
@@ -225,9 +311,9 @@ def tool_fees():
         color=alt.value("#111827"),
     )
 
-    st.altair_chart((bars + labels).properties(height=340, title="Gross → Net Proceeds: Waterfall"), use_container_width=True)
+    st.altair_chart((bars + labels).properties(height=340, title="Gross → Net Proceeds: Waterfall"),
+                    use_container_width=True)
 
-    # CSV export (kept for quick sharing / audit)
     out_df = pd.DataFrame({
         "Component": ["Gross proceeds", "Total fees", "Other costs", "Net proceeds"],
         "Amount": [gross, fees_amount, other_costs, net],

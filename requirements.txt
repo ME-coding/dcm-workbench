@@ -12,3 +12,4 @@ requests
 pypdf
 python-docx
 plotly>=5.0
+docxtpl
