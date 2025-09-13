@@ -2,7 +2,7 @@
 # Streamlit AI Agent — 2-column UI (Ask left, Docs+Search right)
 # - Minimal controls (no temperature, no counters)
 # - Drag & drop (PDF, DOCX, TXT, CSV, MD)
-# - Search in docs: Keywords (regex i) or AI-assist (summary from snippets)
+# - Search in docs: now only AI-assist (summary from snippets)
 # - Mistral API via HTTPS (no SDK)
 # Requirements (add to requirements.txt as needed):
 #   requests
@@ -163,17 +163,25 @@ def _init_state():
         st.session_state.agent_docs = {}
     if "agent_query_input" not in st.session_state:
         st.session_state.agent_query_input = ""
-    if "agent_search_mode" not in st.session_state:
-        st.session_state.agent_search_mode = "Keywords"
 
 # ---------- Search helpers ----------
 def _find_matches(text: str, pattern: re.Pattern, window: int = 80) -> List[str]:
+    """
+    Build short HTML snippets around matches.
+    Fix: collapse PDF line breaks and odd spacing before highlighting,
+    and render with CSS that does NOT preserve hard newlines.
+    """
     snippets = []
     for m in pattern.finditer(text):
         start, end = m.start(), m.end()
         s0 = max(0, start - window)
         e0 = min(len(text), end + window)
-        snippet = text[s0:e0]
+
+        # Raw slice then normalize whitespace (PDFs often insert \n after each word)
+        snippet_raw = text[s0:e0]
+        snippet = re.sub(r"\s+", " ", snippet_raw).strip()
+
+        # Re-run pattern on the normalized snippet for correct highlight offsets
         out, last = [], 0
         for mm in pattern.finditer(snippet):
             a, b = mm.start(), mm.end()
@@ -181,9 +189,15 @@ def _find_matches(text: str, pattern: re.Pattern, window: int = 80) -> List[str]
             out.append(f"<mark>{escape(snippet[a:b])}</mark>")
             last = b
         out.append(escape(snippet[last:]))
+
         prefix = "…" if s0 > 0 else ""
         suffix = "…" if e0 < len(text) else ""
-        snippets.append(f'<div class="snippet">{prefix}{ "".join(out) }{suffix}</div>')
+
+        # Render with normal white-space (wrap long words if needed)
+        snippets.append(
+            f'<div class="snippet" style="white-space: normal; word-break: break-word; overflow-wrap: anywhere;">'
+            f'{prefix}{"".join(out)}{suffix}</div>'
+        )
     return snippets
 
 def _search_keywords(query: str, docs: Dict[str, str], file_filter: str) -> Dict[str, List[str]]:
@@ -212,6 +226,7 @@ def _ai_assist_summary(query: str, results: Dict[str, List[str]], api_key: str) 
     for f, ss in results.items():
         for s in ss[:3]:
             text_only = re.sub("<.*?>", "", s)
+            text_only = re.sub(r"\s+", " ", text_only).strip()  # normalize for clean summary
             flat.append((f, text_only))
     flat = flat[:5]
     snippet_block = "\n".join([f"- [{f}] {t}" for f, t in flat])
@@ -233,16 +248,13 @@ def render_agent():
 
     # ----- LEFT: Ask the agent -----
     with left:
-        st.write("----")
+        st.subheader("Ask the agent")
         with st.form("ask_form", clear_on_submit=True):
             q = st.text_input("Ask the agent", value=st.session_state.agent_query_input, placeholder="Ask something about your documents…")
             sent = st.form_submit_button("Send", use_container_width=True)
-        st.write("----")
 
     # ----- RIGHT: Docs + actions + search -----
     with right:
-        st.write("----")
-
         uploads = st.file_uploader(
             "Drag & drop files here",
             type=["pdf", "docx", "txt", "csv", "md"],
@@ -267,14 +279,13 @@ def render_agent():
                 st.session_state.agent_docs = {}
                 st.rerun()
 
-        st.markdown("---")
-        st.markdown("**Search in docs**")
+        st.subheader("Search in docs")
 
         file_opts = ["All files"] + list(st.session_state.agent_docs.keys())
 
+        # ✅ Removed radio button "Type"
         with st.form("search_form"):
-            s_query = st.text_input("Query", placeholder="keyword or regex (case-insensitive)")
-            mode = st.radio("Type", ["Keywords", "AI-assist"], horizontal=True, index=0, key="agent_search_mode")
+            s_query = st.text_input("Query", placeholder="Enter your question…")
             s_file = st.selectbox("File filter", file_opts, index=0)
             s_submit = st.form_submit_button("Search", use_container_width=True)
 
@@ -283,18 +294,19 @@ def render_agent():
             if not results:
                 st.info("No matches found.")
             else:
-                if mode == "AI-assist":
-                    summary = _ai_assist_summary(s_query, results, api_key)
-                    if summary:
-                        st.markdown("**AI-assisted summary**")
-                        st.markdown(summary)
+                # ✅ Always use AI-assist
+                summary = _ai_assist_summary(s_query, results, api_key)
+                if summary:
+                    st.markdown("**AI-assisted summary**")
+                    st.markdown(
+                        f'<div style="white-space: normal; word-break: break-word; overflow-wrap: anywhere;">{escape(summary)}</div>',
+                        unsafe_allow_html=True,
+                    )
 
                 for fname, snippets in results.items():
                     st.markdown(f'<div class="search-file">{escape(fname)} <span class="hits">({len(snippets)} hit(s))</span></div>', unsafe_allow_html=True)
                     for snip in snippets:
                         st.markdown(snip, unsafe_allow_html=True)
-
-        st.write("----")
 
     # ----- Handle Ask form submission -----
     if 'sent' in locals() and sent and q.strip():
@@ -321,12 +333,11 @@ def render_agent():
 
     # ----- Transcript -----
     with left:
-        st.write("----")
-        st.markdown("**Conversation**")
+        st.subheader("Conversation")
         for msg in st.session_state.agent_messages[-2 * HISTORY_TURNS:]:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
-        st.write("----")
+   
 
 # Public render function expected by app.py
 def render():

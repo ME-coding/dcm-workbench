@@ -86,6 +86,18 @@ st.markdown(
       background:rgba(11,99,197,.14) !important;
       border-color:rgba(11,99,197,.40) !important;
     }
+    hr {
+      border: none;
+      border-top: 3px solid #444; /* trait bien visible et plein */
+      margin: 1.5rem 0;
+    }
+
+    /* Barre verticale entre les deux colonnes */
+    .vertical-separator {
+        border-left: 2px solid rgba(255,255,255,.18);
+        height: 100%;
+        margin: 0 20px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -197,37 +209,39 @@ if section == "Home Page":
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Two desk CONTAINERS côte à côte (même hauteur)
-    col_left, col_right = st.columns(2, vertical_alignment="stretch")
+    # Séparation claire
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # Deux colonnes + barre verticale
+    col_left, col_sep, col_right = st.columns([1, 0.05, 1])
 
     with col_left:
-        with st.container(border=True):
-            st.markdown('<div class="section-head">Structuring Desk</div>', unsafe_allow_html=True)
-            st.markdown('<div class="muted">Pricing, analytics and utilities for primary DCM workflows.</div>', unsafe_allow_html=True)
-            st.markdown('<div class="pillbox">', unsafe_allow_html=True)
-            if st.button("Pricer", type="secondary", key="home_sd_pricer"):
-                _goto("Structuring Desk", "Pricer")
-            st.caption("Multi-product pricing tools and analytics")
-            if st.button("Data Visualisation", type="secondary", key="home_sd_dataviz"):
-                _goto("Structuring Desk", "Data Visualisation")
-            st.caption("Market curves, spreads, and sector visualisations")
-            if st.button("Tools", type="secondary", key="home_sd_tools"):
-                _goto("Structuring Desk", "Tools")
-            st.caption("Utilities for term sheets, fees, amortization")
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-head">Structuring Desk</div>', unsafe_allow_html=True)
+        st.markdown('<div class="pillbox">', unsafe_allow_html=True)
+        if st.button("Pricer", type="secondary", key="home_sd_pricer"):
+            _goto("Structuring Desk", "Pricer")
+        st.caption("Multi-product pricing tools and analytics")
+        if st.button("Data Visualisation", type="secondary", key="home_sd_dataviz"):
+            _goto("Structuring Desk", "Data Visualisation")
+        st.caption("Market curves, spreads, and sector visualisations")
+        if st.button("Tools", type="secondary", key="home_sd_tools"):
+            _goto("Structuring Desk", "Tools")
+        st.caption("Utilities for term sheets, fees, amortization")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col_sep:
+        st.markdown('<div class="vertical-separator"></div>', unsafe_allow_html=True)
 
     with col_right:
-        with st.container(border=True):
-            st.markdown('<div class="section-head">Intelligence Desk</div>', unsafe_allow_html=True)
-            st.markdown('<div class="muted">AI agent and curated news & insights.</div>', unsafe_allow_html=True)
-            st.markdown('<div class="pillbox">', unsafe_allow_html=True)
-            if st.button("AI Agent", type="secondary", key="home_id_agent"):
-                _goto("Intelligence Desk", "AI Agent")
-            st.caption("Chatbot with memory and RAG on uploaded files")
-            if st.button("Latest News and Insights", type="secondary", key="home_id_news"):
-                _goto("Intelligence Desk", "Latest News and Insights")
-            st.caption("Aggregated news, rates dashboards, deal watch")
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-head">Intelligence Desk</div>', unsafe_allow_html=True)
+        st.markdown('<div class="pillbox">', unsafe_allow_html=True)
+        if st.button("AI Agent", type="secondary", key="home_id_agent"):
+            _goto("Intelligence Desk", "AI Agent")
+        st.caption("Chatbot with memory and RAG on uploaded files")
+        if st.button("Latest News and Insights", type="secondary", key="home_id_news"):
+            _goto("Intelligence Desk", "Latest News and Insights")
+        st.caption("Aggregated news, rates dashboards, deal watch")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 elif section == "Structuring Desk":
     _render_hero_from(hero_struct_path)

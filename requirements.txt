@@ -11,3 +11,5 @@ mistralai
 requests
 pypdf
 python-docx
+plotly>=5.0
+pandas-datareader>=0.10

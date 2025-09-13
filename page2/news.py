@@ -28,6 +28,17 @@ try:
 except Exception:
     requests = None
 
+# NEW (pour le graphique OAT–Bund via FRED/OCDE)
+try:
+    from pandas_datareader import data as pdr  # pip install pandas-datareader
+except Exception:
+    pdr = None
+
+try:
+    import plotly.graph_objects as go  # pip install plotly
+except Exception:
+    go = None
+
 
 # =======================================================
 # Helpers & cache
@@ -139,6 +150,8 @@ def fetch_policy_rates() -> pd.DataFrame:
         except Exception:
             return None, None
 
+    # Ton code qui remplit rows
+    rows = []
     up, up_date = fred_last("DFEDTARU")
     lo, lo_date = fred_last("DFEDTARL")
     asof = up_date or lo_date
@@ -147,7 +160,7 @@ def fetch_policy_rates() -> pd.DataFrame:
             "Authority": "Federal Reserve (FOMC)",
             "Measure": "Fed Funds Target Range",
             "Latest": f"{lo:.2f}–{up:.2f}%",
-            "AsOf": asof.tz_convert("Europe/Paris").strftime("%Y-%m-%d") if isinstance(asof, pd.Timestamp) else "",
+            "As of": asof.tz_convert("Europe/Paris").strftime("%Y-%m-%d") if isinstance(asof, pd.Timestamp) else "",
         })
 
     mro, mro_date = fred_last("ECBMRRFR")
@@ -157,15 +170,27 @@ def fetch_policy_rates() -> pd.DataFrame:
             "Authority": "European Central Bank",
             "Measure": "Main Refinancing Rate (MRO)",
             "Latest": f"{mro:.2f}%",
-            "AsOf": mro_date.tz_convert("Europe/Paris").strftime("%Y-%m-%d") if isinstance(mro_date, pd.Timestamp) else "",
+            "As of": mro_date.tz_convert("Europe/Paris").strftime("%Y-%m-%d") if isinstance(mro_date, pd.Timestamp) else "",
         })
     if dfr is not None:
         rows.append({
             "Authority": "European Central Bank",
             "Measure": "Deposit Facility Rate (DFR)",
             "Latest": f"{dfr:.2f}%",
-            "AsOf": dfr_date.tz_convert("Europe/Paris").strftime("%Y-%m-%d") if isinstance(dfr_date, pd.Timestamp) else "",
+            "As of": dfr_date.tz_convert("Europe/Paris").strftime("%Y-%m-%d") if isinstance(dfr_date, pd.Timestamp) else "",
         })
+
+    # Transformation en DataFrame
+    df = pd.DataFrame(rows)
+
+    # Application du style : mettre en gras uniquement la colonne "Latest"
+    def highlight_latest(val):
+        return "font-weight: bold"
+
+    styled_df = df.style.applymap(highlight_latest, subset=["Latest"])
+
+    # Affichage dans Streamlit (index masqué)
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
     if requests is not None:
         try:
@@ -178,7 +203,7 @@ def fetch_policy_rates() -> pd.DataFrame:
                     "Authority": "Bank of England",
                     "Measure": "Official Bank Rate",
                     "Latest": f"{boe_rate:.2f}%",
-                    "AsOf": datetime.utcnow().astimezone().strftime("%Y-%m-%d"),
+                    "As of": datetime.utcnow().astimezone().strftime("%Y-%m-%d"),
                 })
         except Exception:
             pass
@@ -224,7 +249,7 @@ def summarize_with_mistral(text: str, max_bullets: int = 6, temperature: float =
 # =======================================================
 
 def render_links_note():
-    st.markdown("#### DCM quick links")
+    st.markdown("#### Links to financial news")
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -260,9 +285,9 @@ def render_links_note():
         )
 
     with col3:
-        st.markdown("**Sovereign & SSA**")
+        st.markdown("**Sovereign news (SSA)**")
         st.markdown(
-            "- [EU — NGEU / EU Bonds](https://europa.eu/next-generation-eu/)\n"
+            "- [EU — NGEU / EU Bonds](https://european-union.europa.eu/index_fr)\n"
             "- [France Trésor (AFT)](https://www.aft.gouv.fr/)\n"
             "- [Germany — Finanzagentur](https://www.deutsche-finanzagentur.de/)\n"
             "- [UK Debt Management Office](https://www.dmo.gov.uk/)\n"
@@ -457,18 +482,37 @@ def _latest_and_prev(df: pd.DataFrame) -> tuple[float, float]:
 
 
 # =========================
+# NEW: helper pour OAT–Bund (FRED/OCDE mensuel)
+# =========================
+@st.cache_data(ttl=60 * 60 * 12)
+def load_oat_bund_monthly_10y(last_years: int = 10) -> pd.DataFrame:
+    """
+    Charge les 10Y France/Allemagne (OCDE via FRED, mensuel), calcule le spread OAT-Bund en bps.
+    Retourne un DataFrame avec colonnes: Date, FRA_10Y, DEU_10Y, Spread_bps
+    """
+    if pdr is None:
+        return pd.DataFrame(columns=["Date", "FRA_10Y", "DEU_10Y", "Spread_bps"])
+    end = pd.Timestamp.today().normalize()
+    start = end - pd.DateOffset(years=last_years, days=15)  # petite marge
+
+    fr = pdr.DataReader("IRLTLT01FRM156N", "fred", start, end).rename(columns={"IRLTLT01FRM156N": "FRA_10Y"})
+    de = pdr.DataReader("IRLTLT01DEM156N", "fred", start, end).rename(columns={"IRLTLT01DEM156N": "DEU_10Y"})
+
+    df = pd.concat([fr, de], axis=1).dropna()
+    df["Spread_bps"] = (df["FRA_10Y"] - df["DEU_10Y"]) * 100  # points de base
+    df = df.reset_index().rename(columns={"DATE": "Date"})
+    return df
+
+
+# =========================
 # NEW: Macroeconomics Dashboard (fusion)
 # =========================
 def render_macroeconomics_dashboard():
     st.markdown("#### Macroeconomics Dashboard")
     st.caption("Central banks & macro feeds — Official feeds and latest policy rates for Fed / ECB / BoE. Edit/add your own if needed.")
 
-    # --- Policy rates table only (keep) ---
-    rates_df = fetch_policy_rates()
-    if not rates_df.empty:
-        st.dataframe(rates_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("Could not fetch policy rates automatically.")
+    # --- Policy rates table: fetch & display inside fetch_policy_rates (no duplicate table) ---
+    _ = fetch_policy_rates()
 
     st.markdown("##### Latest levels (10Y)")
     # Keep only these 4 series
@@ -494,29 +538,46 @@ def render_macroeconomics_dashboard():
         with cols[i]:
             st.metric(name, f"{close:,.3f}", f"{delta:+.2f}% d/d")
 
-    # --- One interactive multi-series chart (zoom/pan) ---
-    plot_rows = []
-    for nm, df in data.items():
-        if getattr(df, "empty", True):
-            continue
-        tmp = _to_plot_df(df)
-        if nm.startswith("US "):
-            tmp = tmp.copy()
-            tmp["Close"] = tmp["Close"] / 10.0
-        tmp["Series"] = nm
-        plot_rows.append(tmp)
+    # --- REMPLACEMENT: Graphique OAT–Bund (mensuel OCDE via FRED)
+    st.markdown("##### OAT–Bund 10Y Spread (10 ans, mensuel OCDE via FRED)")
+    st.caption("Le spread est calculé **OAT 10Y – Bund 10Y** et affiché en points de base (bps).")
 
-    if plot_rows:
-        merged = pd.concat(plot_rows, ignore_index=True)
-        base = alt.Chart(merged).mark_line().encode(
-            x=alt.X("Date:T", title=None),
-            y=alt.Y("Close:Q", title="Yield (%)", scale=alt.Scale(zero=False)),
-            color=alt.Color("Series:N", legend=alt.Legend(title=None)),
-            tooltip=[alt.Tooltip("Date:T"), alt.Tooltip("Series:N"), alt.Tooltip("Close:Q", format=",.3f")]
-        )
-        st.altair_chart(base.interactive().properties(height=260), use_container_width=True)
+    if go is None:
+        st.info("Plotly non disponible. Installez `plotly` pour afficher le graphique interactif.")
+        return
+
+    df_spread = load_oat_bund_monthly_10y(10)
+    if df_spread.empty:
+        st.info("Données indisponibles (pandas-datareader requis). Installez `pandas-datareader`.")
     else:
-        st.info("No data to plot yet.")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df_spread["Date"], y=df_spread["Spread_bps"],
+            mode="lines", name="OAT–Bund (bps)"
+        ))
+        # ligne horizontale 0
+        fig.add_hline(y=0, line_dash="dot")
+
+        # Moyenne mobile 6 mois (optionnelle)
+        if len(df_spread) >= 6:
+            fig.add_trace(go.Scatter(
+                x=df_spread["Date"], y=df_spread["Spread_bps"].rolling(6).mean(),
+                mode="lines", name="MM 6 mois"
+            ))
+
+        fig.update_layout(
+            margin=dict(l=10, r=10, t=30, b=10),
+            height=420,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            yaxis_title="Spread (bps)",
+            xaxis_title="Date"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Voir / exporter les données"):
+            st.dataframe(df_spread, use_container_width=True)
+            csv = df_spread.to_csv(index=False).encode("utf-8")
+            st.download_button("Télécharger CSV", data=csv, file_name="oat_bund_spread_10y_monthly.csv", mime="text/csv")
 
 
 # (Legacy sections kept unchanged for the rest of the app, but no longer used in tabs)
