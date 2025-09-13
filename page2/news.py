@@ -28,17 +28,6 @@ try:
 except Exception:
     requests = None
 
-# NEW (pour le graphique OAT–Bund via FRED/OCDE)
-try:
-    from pandas_datareader import data as pdr  # pip install pandas-datareader
-except Exception:
-    pdr = None
-
-try:
-    import plotly.graph_objects as go  # pip install plotly
-except Exception:
-    go = None
-
 
 # =======================================================
 # Helpers & cache
@@ -482,29 +471,6 @@ def _latest_and_prev(df: pd.DataFrame) -> tuple[float, float]:
 
 
 # =========================
-# NEW: helper pour OAT–Bund (FRED/OCDE mensuel)
-# =========================
-@st.cache_data(ttl=60 * 60 * 12)
-def load_oat_bund_monthly_10y(last_years: int = 10) -> pd.DataFrame:
-    """
-    Charge les 10Y France/Allemagne (OCDE via FRED, mensuel), calcule le spread OAT-Bund en bps.
-    Retourne un DataFrame avec colonnes: Date, FRA_10Y, DEU_10Y, Spread_bps
-    """
-    if pdr is None:
-        return pd.DataFrame(columns=["Date", "FRA_10Y", "DEU_10Y", "Spread_bps"])
-    end = pd.Timestamp.today().normalize()
-    start = end - pd.DateOffset(years=last_years, days=15)  # petite marge
-
-    fr = pdr.DataReader("IRLTLT01FRM156N", "fred", start, end).rename(columns={"IRLTLT01FRM156N": "FRA_10Y"})
-    de = pdr.DataReader("IRLTLT01DEM156N", "fred", start, end).rename(columns={"IRLTLT01DEM156N": "DEU_10Y"})
-
-    df = pd.concat([fr, de], axis=1).dropna()
-    df["Spread_bps"] = (df["FRA_10Y"] - df["DEU_10Y"]) * 100  # points de base
-    df = df.reset_index().rename(columns={"DATE": "Date"})
-    return df
-
-
-# =========================
 # NEW: Macroeconomics Dashboard (fusion)
 # =========================
 def render_macroeconomics_dashboard():
@@ -538,46 +504,175 @@ def render_macroeconomics_dashboard():
         with cols[i]:
             st.metric(name, f"{close:,.3f}", f"{delta:+.2f}% d/d")
 
-    # --- REMPLACEMENT: Graphique OAT–Bund (mensuel OCDE via FRED)
-    st.markdown("##### OAT–Bund 10Y Spread (10 ans, mensuel OCDE via FRED)")
-    st.caption("Le spread est calculé **OAT 10Y – Bund 10Y** et affiché en points de base (bps).")
+    # === REPLACED / UPDATED: Spreads chart (US−FR & FR−DE), mensuel, 10 dernières années ===
+    DATA_DIR = r"C:\Users\Maxime\Dev\DCM_Workbench\xlx"
 
-    if go is None:
-        st.info("Plotly non disponible. Installez `plotly` pour afficher le graphique interactif.")
+    def _pick_file(patterns: list[str]) -> Optional[str]:
+        try:
+            files = os.listdir(DATA_DIR)
+        except Exception:
+            return None
+        for p in patterns:
+            regex = re.compile(p, re.IGNORECASE)
+            candidates = [f for f in files if regex.search(f)]
+            if candidates:
+                # prend le plus récent (mtime)
+                candidates.sort(key=lambda fn: os.path.getmtime(os.path.join(DATA_DIR, fn)), reverse=True)
+                return os.path.join(DATA_DIR, candidates[0])
+        return None
+
+    def _load_monthly_series(path: str) -> pd.DataFrame:
+        df = pd.read_csv(path)
+        # normalise colonnes
+        df.columns = [c.strip().lower() for c in df.columns]
+        # colonne date
+        date_col = None
+        for c in ["date", "observation_date", "month"]:
+            if c in df.columns:
+                date_col = c
+                break
+        if not date_col:
+            # fallback: première colonne
+            date_col = df.columns[0]
+        # colonne valeur
+        val_col = None
+        for c in ["value", "yield", "yld", "rate", "close", "price"]:
+            if c in df.columns:
+                val_col = c
+                break
+        if not val_col:
+            # fallback: première colonne numérique != date
+            num_cols = [c for c in df.columns if c != date_col]
+            for c in num_cols:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+            num_cols = [c for c in num_cols if pd.api.types.is_numeric_dtype(df[c])]
+            if not num_cols:
+                raise ValueError(f"No numeric value column in {os.path.basename(path)}")
+            val_col = num_cols[0]
+
+        out = df[[date_col, val_col]].copy()
+        out.columns = ["Date", "Value"]
+        out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+        out["Value"] = pd.to_numeric(out["Value"], errors="coerce")
+        out = out.dropna(subset=["Date", "Value"]).sort_values("Date")
+
+        # ré-échantillonne en mensuel si nécessaire (dernier point du mois)
+        monthly_points = out["Date"].dt.to_period("M").nunique()
+        if monthly_points < len(out) * 0.9:
+            out = (
+                out.set_index("Date")
+                   .resample("M")
+                   .last()
+                   .reset_index()
+            )
+
+        # date = fin de mois pour alignement propre
+        out["Date"] = out["Date"].dt.to_period("M").dt.to_timestamp("M")
+        out = out.drop_duplicates(subset=["Date"], keep="last")
+        return out
+
+    # Fichiers attendus (US, FR, DE)
+    us_path = _pick_file([r"^IRLTLT01USM156N.*\.csv$", r"^US-?10Y.*\.csv$", r".*US.*10.*\.csv$"])
+    fr_path = _pick_file([r"^IRLTLT01FRM156N.*\.csv$", r"^FR-?10Y.*\.csv$", r".*(FR|FRA).*10.*\.csv$"])
+    de_path = _pick_file([r"^IRLTLT01DEM156N.*\.csv$", r"^DE-?10Y.*\.csv$", r".*(DE|GER|DEU).*10.*\.csv$"])
+
+    if not us_path or not fr_path or not de_path:
+        missing = []
+        if not us_path: missing.append("US (IRLTLT01USM156N*.csv / US-10Y*.csv)")
+        if not fr_path: missing.append("France (IRLTLT01FRM156N*.csv / FR-10Y*.csv)")
+        if not de_path: missing.append("Germany (IRLTLT01DEM156N*.csv / DE-10Y*.csv)")
+        st.info(f"Spread chart: CSV introuvables dans `{DATA_DIR}`. Manquants: {', '.join(missing)}")
         return
 
-    df_spread = load_oat_bund_monthly_10y(10)
-    if df_spread.empty:
-        st.info("Données indisponibles (pandas-datareader requis). Installez `pandas-datareader`.")
-    else:
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df_spread["Date"], y=df_spread["Spread_bps"],
-            mode="lines", name="OAT–Bund (bps)"
-        ))
-        # ligne horizontale 0
-        fig.add_hline(y=0, line_dash="dot")
+    try:
+        us = _load_monthly_series(us_path).rename(columns={"Value": "US_10Y"})
+        fr = _load_monthly_series(fr_path).rename(columns={"Value": "FR_10Y"})
+        de = _load_monthly_series(de_path).rename(columns={"Value": "DE_10Y"})
 
-        # Moyenne mobile 6 mois (optionnelle)
-        if len(df_spread) >= 6:
-            fig.add_trace(go.Scatter(
-                x=df_spread["Date"], y=df_spread["Spread_bps"].rolling(6).mean(),
-                mode="lines", name="MM 6 mois"
-            ))
+        df = us.merge(fr, on="Date", how="inner").merge(de, on="Date", how="inner").sort_values("Date")
 
-        fig.update_layout(
-            margin=dict(l=10, r=10, t=30, b=10),
-            height=420,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            yaxis_title="Spread (bps)",
-            xaxis_title="Date"
+        # Spreads (renommage demandé)
+        df["spread_pp_FR_vs_US"] = (df["US_10Y"] - df["FR_10Y"]).round(3)  # US − FR
+        df["spread_pp_FR_vs_DE"] = (df["FR_10Y"] - df["DE_10Y"]).round(3)  # FR − DE (OAT − Bund)
+
+        # Filtre 10 dernières années
+        today = pd.Timestamp.today().normalize()
+        cutoff = (today - pd.DateOffset(years=10)).to_period("M").to_timestamp("M")
+        df10 = df[df["Date"] >= cutoff].copy()
+
+        # ----- Graphique spreads (Altair) -----
+        series_labels = {
+            "spread_pp_FR_vs_US": "Spread (US 10Y − FR 10Y)",
+            "spread_pp_FR_vs_DE": "Spread (FR 10Y − DE 10Y)",
+        }
+        plot_long = pd.melt(
+            df10,
+            id_vars=["Date"],
+            value_vars=["spread_pp_FR_vs_US", "spread_pp_FR_vs_DE"],
+            var_name="Series",
+            value_name="Spread_pp"
         )
-        st.plotly_chart(fig, use_container_width=True)
+        plot_long["Series"] = plot_long["Series"].map(series_labels)
 
-        with st.expander("Voir / exporter les données"):
-            st.dataframe(df_spread, use_container_width=True)
-            csv = df_spread.to_csv(index=False).encode("utf-8")
-            st.download_button("Télécharger CSV", data=csv, file_name="oat_bund_spread_10y_monthly.csv", mime="text/csv")
+        # Titre via Streamlit (évite qu’il soit masqué par les métriques au-dessus)
+        st.markdown("##### US−FR & FR−DE 10Y Long-Term Government Bond Yield Spreads (OECD/MEI, Monthly) — Last 10 Years")
+
+        zero_line = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(strokeDash=[6, 4]).encode(y="y:Q")
+
+        chart = (
+            alt.layer(
+                alt.Chart(plot_long)
+                   .mark_line()
+                   .encode(
+                       x=alt.X(
+                           "Date:T",
+                           title="Date (month end)",
+                           axis=alt.Axis(
+                               format="%Y",          # affichage des années
+                               tickCount="year",     # un tick par année
+                               labelAngle=0,         # labels horizontaux
+                               ticks=True,
+                               domain=True
+                           ),
+                       ),
+                       y=alt.Y(
+                           "Spread_pp:Q",
+                           title="Spread (percentage points)",
+                           scale=alt.Scale(zero=False)
+                       ),
+                       color=alt.Color("Series:N", legend=alt.Legend(title=None)),
+                       tooltip=[
+                           alt.Tooltip("Date:T"),
+                           alt.Tooltip("Series:N"),
+                           alt.Tooltip("Spread_pp:Q", title="Spread", format=",.3f"),
+                       ],
+                   ),
+                zero_line
+            )
+            .properties(height=260)   # <-- plus de title Altair ici
+            .interactive()
+        )
+
+        st.altair_chart(chart, use_container_width=True)
+
+        # Source en caption + lien FRED (demandé)
+        st.caption(
+            "Spreads: US−FR = US 10Y − France 10Y ; FR−DE = France 10Y − Germany 10Y. "
+            "Source: OECD/MEI via FRED — US: IRLTLT01USM156N, FR: IRLTLT01FRM156N, DE: IRLTLT01DEM156N. "
+            "Voir FRED (US 10Y): https://fred.stlouisfed.org/series/IRLTLT01USM156N#:~:text=Observations"
+        )
+        # # FRED source link (as requested):
+        # https://fred.stlouisfed.org/series/IRLTLT01USM156N#:~:text=Observations
+
+        # Tableau QA enrichi
+        with st.expander("Latest observations (QA)"):
+            qa_cols = ["Date", "US_10Y", "FR_10Y", "DE_10Y", "spread_pp_FR_vs_US", "spread_pp_FR_vs_DE"]
+            st.dataframe(df10[qa_cols].tail(24).set_index("Date"), use_container_width=True)
+
+    except Exception as e:
+        st.error(f"US–FR / FR–DE 10Y spreads error: {e}")
+
+    # === END UPDATED ===
 
 
 # (Legacy sections kept unchanged for the rest of the app, but no longer used in tabs)
