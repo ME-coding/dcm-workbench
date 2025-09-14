@@ -473,6 +473,7 @@ def _latest_and_prev(df: pd.DataFrame) -> tuple[float, float]:
 # NEW: Macroeconomics Dashboard (fusion)
 # =========================
 def render_macroeconomics_dashboard():
+    global pd
     st.markdown("#### Macroeconomics Dashboard")
     st.caption("Central banks & macro feeds — Official feeds and latest policy rates for Fed / ECB / BoE. Edit/add your own if needed.")
 
