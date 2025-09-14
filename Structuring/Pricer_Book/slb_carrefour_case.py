@@ -1,361 +1,261 @@
+# Structuring/Pricer_Book/slb_carrefour_case.py
+# SLB — Carrefour (educational) | Component-style: expose render()
+
 from __future__ import annotations
 
-from .core import (
-    build_schedule_fixed,
-    build_schedule_variable,
-    present_value,
-    price_from_yield,
-    yield_from_price,
-    macaulay_duration_convexity,
-    truncate_with_redemption,
-)
-
-# DCM_Project/Pricer_Book/slb_carrefour_case.py
-
-from pathlib import Path
-from typing import Tuple
+from datetime import date
+from dataclasses import dataclass
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
+import altair as alt
 import streamlit as st
-import altair as alt  # <-- ajouté pour le graphique SLB créatif
-import math
 
-# Core utilities shared in your project
-from .core import (
-    build_schedule_variable,   # (notional, rates_annual[], freq, structure)
-    price_from_yield,
-    yield_from_price,
-    macaulay_duration_convexity,
+# ----------------------------
+# Helper data structures
+# ----------------------------
+@dataclass
+class SLBTerms:
+    notional: float
+    coupon: float                 # e.g., 0.0375
+    issue_date: date
+    first_full_ipd: date
+    maturity_date: date
+    payment_month_day: Tuple[int, int]
+    day_count: str = "Actual/Actual-ICMA"  # label only (simplified accrual)
+    step_up_bps: float = 25.0
+    step_up_years: List[int] = None
+    denomination: float = 100_000.0
+
+    def schedule_years(self) -> List[int]:
+        start_year = self.first_full_ipd.year
+        end_year = self.maturity_date.year
+        return list(range(start_year, end_year + 1))
+
+# ----------------------------
+# Defaults (Carrefour June 2025)
+# ----------------------------
+_DEFAULT_TERMS = SLBTerms(
+    notional=650_000_000.0,
+    coupon=0.0375,
+    issue_date=date(2025, 6, 24),
+    first_full_ipd=date(2026, 5, 24),
+    maturity_date=date(2033, 5, 24),
+    payment_month_day=(5, 24),
+    step_up_bps=25.0,
+    step_up_years=[2031, 2032, 2033],
+    denomination=100_000.0
 )
 
-# Shared charts
-from .visuals import (
-    price_yield_chart,
-    cashflow_breakdown_chart,
-    amortization_chart,
-    rate_path_chart,
-)
+# ----------------------------
+# Internal helpers
+# ----------------------------
+def _build_cashflows(terms: SLBTerms, coupon_rate: float, step_up_bps: float,
+                     step_up_years: List[int], apply_step_up: bool) -> pd.DataFrame:
+    years = terms.schedule_years()
+    rows = []
+    for y in years:
+        effective_coupon_rate = coupon_rate
+        stepup_extra = 0.0
+        if apply_step_up and (y in step_up_years):
+            effective_coupon_rate = coupon_rate + step_up_bps / 10_000.0
+            stepup_extra = (effective_coupon_rate - coupon_rate) * terms.notional
+        coupon_cash = effective_coupon_rate * terms.notional
+        principal = terms.notional if y == terms.maturity_date.year else 0.0
+        rows.append({
+            "year": y,
+            "coupon_rate_%": effective_coupon_rate * 100.0,
+            "coupon_cash": coupon_cash,
+            "stepup_extra": stepup_extra,
+            "principal": principal,
+            "total_cf": coupon_cash + principal
+        })
+    return pd.DataFrame(rows)
 
-# =========================================================
-# Case data (from the press release / term-sheet snippets)
-# =========================================================
-CASE_NAME   = "Carrefour — Sustainability-Linked Bond (2025)"
-ISSUER      = "Carrefour SA"
-CASE_SIZE   = 650_000_000.0          # €650m
-CASE_COUPON = 3.75                    # % p.a. base coupon
-CASE_TENOR  = 7.9                     # years to May-2033 from mid-2025 (approx.)
-CASE_FREQ   = 2                       # semi-annual
-CASE_FMT    = "Fixed, bullet"         # format text only
+def _price_from_cashflows(df: pd.DataFrame, flat_yield_pct: float) -> float:
+    y = flat_yield_pct / 100.0
+    price = 0.0
+    # Pedagogical: discount each annual CF back to the first full IPD as t = 1..N
+    for i, (_, r) in enumerate(df.iterrows(), start=1):
+        price += r["total_cf"] / ((1 + y) ** i)
+    return price
 
-# =========================================================
-# Schedule builder for SLB with 2 KPIs and step adjustments
-# =========================================================
-def build_slb_schedule(
-    notional: float,
-    base_coupon_pct: float,           # in %
-    freq: int,
-    years: float,
-    structure: str,
-    # KPI 1 — GHG (Scopes 1&2)
-    kpi1_met: bool,
-    kpi1_obs_year: float,
-    kpi1_step_bps_if_missed: float,
-    # KPI 2 — Suppliers engaged
-    kpi2_met: bool,
-    kpi2_obs_year: float,
-    kpi2_step_bps_if_missed: float,
-):
-    """
-    Build per-period annual 'profit' rates reflecting SLB step-ups if KPIs are missed.
-    (Educational simplification — we only model step-ups; no step-downs or make-wholes.)
-    Returns (schedule_df, times_years (np.ndarray), rate_path_pct (np.ndarray))
-    """
-    n = max(1, int(round(freq * years)))
-    per = 1 / freq
-    times = np.arange(1, n + 1) * per
-
-    # Start with flat base coupon (annual %)
-    path_pct = np.full(n, base_coupon_pct, dtype=float)
-
-    # Apply step-up from observation date onward if KPI missed
-    if not kpi1_met:
-        path_pct[times >= kpi1_obs_year] += kpi1_step_bps_if_missed / 100.0
-    if not kpi2_met:
-        path_pct[times >= kpi2_obs_year] += kpi2_step_bps_if_missed / 100.0
-
-    # Convert to decimals for the schedule builder
-    rates_annual = (path_pct / 100.0).tolist()
-    df = build_schedule_variable(notional, rates_annual, freq, structure)
-    df["Total CF"] = df["Coupon/Profit"] + df["Principal"]
-    return df, times, path_pct
-
-
-# =========================================================
-# UI
-# =========================================================
+# ----------------------------
+# Public entrypoint
+# ----------------------------
 def render():
-    st.subheader("Structuring Desk — SLB Case Study")
+    # --- Header ---
+    st.title("SLB — Carrefour (KPI Simulator & Pricing)")
+    st.caption("Sandbox pédagogique : simulate les KPIs 2030 → observe step-ups (2031–2033), coupons, cash-flows et prix.")
+
+    with st.expander("Résumé du cas (source publique)", expanded=True):
+        st.markdown(
+            """
+**Aperçu.** Juin 2025, Carrefour émet un **SLB €650m**, **coupon 3.75%** annuel, maturité **24 mai 2033**.  
+Les coupons **payés en 2031, 2032, 2033** montent de **+25 bps** si au 31 déc. 2030 **au moins un** des objectifs n’est atteint :  
+(i) **–50%** d’émissions GES Scope 1&2 vs 2019 ; (ii) **150 fournisseurs** engagés dans une stratégie climat.  
+*NB: conventions et discounting simplifiés pour fins pédagogiques.*
+"""
+        )
+
+    st.markdown("---")
+    st.header("Paramètres interactifs")
+
+    colA, colB, colC = st.columns([1.2, 1.1, 1.1])
+
+    # --- KPIs ---
+    with colA:
+        st.subheader("KPIs (au 31 déc. 2030)")
+        ghg_now = st.slider(
+            "Réduction GES Scope 1&2 vs 2019",
+            min_value=0, max_value=100, value=45, step=1, format="%d%%",
+            help="Cible: au moins 50%."
+        )
+        suppliers_now = st.slider(
+            "Fournisseurs engagés dans une stratégie climat",
+            min_value=0, max_value=300, value=120, step=5,
+            help="Cible: au moins 150."
+        )
+        st.markdown(f"- Seuils cibles: **≥ 50%** GES ; **≥ 150** fournisseurs\n- Tes inputs: **{ghg_now}%** ; **{suppliers_now}**")
+
+    # --- Terms ---
+    with colB:
+        st.subheader("Term sheet")
+        notional = st.number_input("Notional (EUR)", min_value=1_000_000.0, value=_DEFAULT_TERMS.notional, step=1_000_000.0)
+        coupon_pct = st.number_input("Coupon de base (%)", min_value=0.0, value=_DEFAULT_TERMS.coupon * 100, step=0.05, format="%.2f")
+        step_up_bps = st.number_input("Step-up si objectifs manqués (bps)", min_value=0.0, value=_DEFAULT_TERMS.step_up_bps, step=5.0)
+        step_up_years = st.multiselect(
+            "Années de paiement où le step-up s'applique",
+            options=_DEFAULT_TERMS.schedule_years(),
+            default=_DEFAULT_TERMS.step_up_years
+        )
+
+    # --- Pricing ---
+    with colC:
+        st.subheader("Pricing (flat)")
+        st.markdown('<div style="color:#6b7280;font-size:0.95rem;margin-top:-0.25rem;">Taux plat pour un prix propre sur dates coupon (vision pédagogique).</div>', unsafe_allow_html=True)
+        y_base_pct = st.slider("Taux de discount (%)", 0.0, 10.0, 3.80, 0.05)
+        show_pv_breakdown = st.checkbox("Afficher le tableau de cash-flows actualisés", value=False)
+
+    # Trigger logic: step-up si ≥1 KPI manqué
+    miss_ghg = ghg_now < 50
+    miss_sup = suppliers_now < 150
+    miss_any = miss_ghg or miss_sup
+
+    # Terms instance (à partir des inputs)
+    terms = SLBTerms(
+        notional=notional,
+        coupon=coupon_pct / 100.0,
+        issue_date=_DEFAULT_TERMS.issue_date,
+        first_full_ipd=_DEFAULT_TERMS.first_full_ipd,
+        maturity_date=_DEFAULT_TERMS.maturity_date,
+        payment_month_day=_DEFAULT_TERMS.payment_month_day,
+        step_up_bps=step_up_bps,
+        step_up_years=step_up_years,
+        denomination=_DEFAULT_TERMS.denomination
+    )
+
+    # Cash-flows
+    flows_base = _build_cashflows(terms, terms.coupon, terms.step_up_bps, terms.step_up_years, apply_step_up=False)
+    flows_step = _build_cashflows(terms, terms.coupon, terms.step_up_bps, terms.step_up_years, apply_step_up=True) if miss_any else flows_base.copy()
+
+    # Prices
+    price_base = _price_from_cashflows(flows_base, y_base_pct)
+    price_step = _price_from_cashflows(flows_step, y_base_pct)
+
+    # Status pill
+    pill_text = "Pas de step-up (objectifs atteints)" if not miss_any else "Step-up appliqué (≥1 objectif manqué)"
+    pill_color = "#10b981" if not miss_any else "#ef4444"
+    st.markdown(f'<span style="display:inline-block;padding:.2rem .6rem;border-radius:999px;background:#eefdf6;color:{pill_color};font-weight:600;font-size:.9rem;">{pill_text}</span>', unsafe_allow_html=True)
 
     st.markdown(
         f"""
-**Case:** *{CASE_NAME}*  
-**Issuer:** {ISSUER} · **Issue Size:** €{CASE_SIZE:,.0f} · **Format:** {CASE_FMT}  
-**Base coupon:** **{CASE_COUPON:.2f}%** p.a. · **Tenor:** ~{CASE_TENOR:g}y · **Freq.:** Semi-annual
-        """
+<div style="background:#f9fafb;border:1px solid #e5e7eb;padding:.75rem .85rem;border-radius:.5rem;font-size:.95rem;">
+<strong>Clean price (par rapport au notional total € {int(terms.notional):,}, discount {y_base_pct:.2f}%):</strong><br>
+• Si objectifs atteints : € {price_base:,.0f}<br>
+• Si objectifs manqués : € {price_step:,.0f}<br><br>
+<strong>Écart de prix :</strong> € {price_step - price_base:,.0f}
+</div>
+        """,
+        unsafe_allow_html=True
     )
 
-    slb_carrefour_case_ui = render
-
-    # ------------------ Parameters (sliders & toggles only) ------------------
-    st.markdown("### Case parameters & KPI performance")
-
-    # Left box: capital structure / solve; Right box: KPI logic
-    lcol, rcol = st.columns([1.1, 1.3])
-
-    with lcol:
-        # Notional (slider, keep wide range but start at case size)
-        notional = st.slider(
-            "Notional (€)", min_value=100_000_000, max_value=1_500_000_000,
-            value=int(CASE_SIZE), step=50_000_000, help="For scenario sizing / PV scaling."
-        )
-        years = st.slider(
-            "Maturity (years)", min_value=1.0, max_value=15.0,
-            value=float(CASE_TENOR), step=0.1
-        )
-        freq_label = st.selectbox("Coupon frequency", ["Annual", "Semi-annual", "Quarterly"], index=1)
-        freq = {"Annual": 1, "Semi-annual": 2, "Quarterly": 4}[freq_label]
-        structure = st.selectbox("Structure", ["bullet", "equal_principal"], index=0)
-
-        # Solve mode
-        solve_mode = st.radio("Solve for", ["Price (given Yield)", "Yield (given Clean Price)"], horizontal=True)
-        if solve_mode == "Price (given Yield)":
-            ytm_pct = st.slider("Yield to Maturity (%)", 0.00, 12.00, 5.00, 0.05)
-        else:
-            clean_target = st.slider("Target clean price (per 100)", 50.0, 130.0, 100.0, 0.5)
-
-        grid_bps = st.slider("Price–Yield grid width (bps)", 50, 500, 200, 25)
-
-    with rcol:
-        st.markdown("#### KPI performance & step-up rules (interactive)")
-        base_coupon_pct = st.slider("Base coupon (%)", 0.00, 10.00, float(CASE_COUPON), 0.05)
-
-        # KPI 1 — GHG (Scopes 1&2)
-        st.markdown("**KPI #1 — GHG (Scopes 1&2)**")
-        kpi1_met = st.toggle("Target met?", value=False, help="If unticked = missed → step-up applies from the observation date.")
-        kpi1_obs_year = st.slider("Observation year (KPI #1)", 0.5, years, min(3.0, years), 0.5)
-        kpi1_step_bps = st.slider("Step-up if missed (bp) — KPI #1", 0.0, 50.0, 25.0, 5.0)
-
-        # KPI 2 — Suppliers engaged in climate strategy
-        st.markdown("**KPI #2 — Suppliers engaged**")
-        kpi2_met = st.toggle("Target met?  ", value=True, help="If unticked = missed → step-up applies from the observation date.")
-        kpi2_obs_year = st.slider("Observation year (KPI #2)", 0.5, years, min(5.0, years), 0.5)
-        kpi2_step_bps = st.slider("Step-up if missed (bp) — KPI #2", 0.0, 50.0, 25.0, 5.0)
-
-    # ------------------ Build schedule from KPI selections ------------------
-    schedule, times, path_pct = build_slb_schedule(
-        notional,
-        base_coupon_pct,
-        freq,
-        years,
-        structure,
-        kpi1_met, kpi1_obs_year, kpi1_step_bps,
-        kpi2_met, kpi2_obs_year, kpi2_step_bps,
-    )
-
-    # ------------------ Solve & core risk -----------------------------------
-    if solve_mode == "Price (given Yield)":
-        ytm = ytm_pct / 100.0
-        clean, accrued, dirty = price_from_yield(schedule, ytm, freq, notional, accrued_frac=0.0)
-        _, mac_dur, mod_dur, conv = macaulay_duration_convexity(schedule, ytm, freq)
-    else:
-        ytm = yield_from_price(schedule, clean_target, freq, notional)
-        clean, accrued, dirty = price_from_yield(schedule, ytm, freq, notional, accrued_frac=0.0)
-        _, mac_dur, mod_dur, conv = macaulay_duration_convexity(schedule, ytm, freq)
-
-    # KPIs summary
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Clean Price (per 100)", f"{clean:,.4f}")
-    k2.metric("Dirty Price (per 100)", f"{dirty:,.4f}")
-    k3.metric("YTM (%)", f"{ytm*100:,.4f}")
-    k4.metric("Modified Duration (yrs)", f"{mod_dur:,.4f}")
-    k5, k6, k7 = st.columns(3)
-    k5.metric("Macaulay Duration (yrs)", f"{mac_dur:,.4f}")
-    k6.metric("Convexity (yrs²)", f"{conv:,.4f}")
-    # simple text badges
-    st.caption(
-        f"KPI #1 (GHG) — **{'Met' if kpi1_met else 'Missed'}** at {kpi1_obs_year:g}y · "
-        f"KPI #2 (Suppliers) — **{'Met' if kpi2_met else 'Missed'}** at {kpi2_obs_year:g}y."
-    )
-
-    # ------------------ Charts (interactive) --------------------------------
-    st.markdown("### Results & Charts")
+    # --- Charts side-by-side ---
     left, right = st.columns(2)
 
-    # Price–Yield curve around current YTM (interactive)
-    bps = grid_bps / 10_000.0
-    y_grid = np.linspace(max(-0.99, ytm - bps), ytm + bps, 41)
-    prices = np.array([price_from_yield(schedule, y, freq, notional, 0.0)[0] for y in y_grid])
     with left:
-        st.altair_chart(
-            price_yield_chart(y_grid * 100, prices, title="Price–Yield (with KPI-driven steps)").interactive(),
-            use_container_width=True
-        )
+        st.subheader("Trajectoire de coupon")
+        st.markdown('<div style="color:#6b7280;font-size:0.95rem;margin-top:-0.25rem;">Coupons annuels payés ; le step-up ne s’applique qu’aux derniers coupons si la cible 2030 est manquée.</div>', unsafe_allow_html=True)
+
+        base_line = flows_base[["year", "coupon_rate_%"]].copy()
+        base_line["scenario"] = "Base (objectifs atteints)"
+        step_line = flows_step[["year", "coupon_rate_%"]].copy()
+        step_line["scenario"] = "Selon tes inputs"
+        chart_data = pd.concat([base_line, step_line], ignore_index=True)
+
+        line = alt.Chart(chart_data).mark_line(point=True).encode(
+            x=alt.X("year:O", title="Année de coupon"),
+            y=alt.Y("coupon_rate_%:Q", title="Coupon (%)"),
+            color=alt.Color("scenario:N", title="Scénario")
+        ).properties(height=360).interactive()
+
+        st.altair_chart(line, use_container_width=True)
+        st.caption("Comparaison des coupons avec/sans step-up selon les KPIs 2030.")
 
     with right:
-        st.altair_chart(cashflow_breakdown_chart(schedule).interactive(), use_container_width=True)
+        st.subheader("Prix vs taux de discount")
+        st.markdown('<div style="color:#6b7280;font-size:0.95rem;margin-top:-0.25rem;">Prix propre (dates de coupon) en fonction d’un taux plat, avec et sans step-up.</div>', unsafe_allow_html=True)
 
-    r1, r2 = st.columns(2)
+        y_grid = np.linspace(1.0, 7.0, 31)
+        prices_base = [_price_from_cashflows(flows_base, y_) for y_ in y_grid]
+        prices_step = [_price_from_cashflows(flows_step, y_) for y_ in y_grid]
 
-    # Remplacement de l'amortization chart par un graphique SLB créatif
-    with r1:
-        # KPI Step-Up Timeline: ligne du coupon effectif, ligne base (pointillée),
-        # et règles/points aux dates d'observation avec statut Met/Missed.
-        df_coupon = pd.DataFrame({
-            "Time (years)": times,
-            "Coupon (%)": path_pct,
-            "Base coupon (%)": np.full_like(path_pct, base_coupon_pct, dtype=float),
-        })
+        df_price = pd.DataFrame({
+            "discount_rate_%": y_grid,
+            "price_if_targets_met": prices_base,
+            "price_if_targets_missed": prices_step
+        }).melt(id_vars="discount_rate_%", var_name="scenario", value_name="price_eur")
 
-        marks = pd.DataFrame({
-            "Time (years)": [kpi1_obs_year, kpi2_obs_year],
-            "KPI": ["GHG", "Suppliers"],
-            "Status": ["Met" if kpi1_met else "Missed", "Met" if kpi2_met else "Missed"],
-            "Step (bp)": [0.0 if kpi1_met else kpi1_step_bps, 0.0 if kpi2_met else kpi2_step_bps],
-        })
+        area = alt.Chart(df_price).mark_line().encode(
+            x=alt.X("discount_rate_%:Q", title="Taux plat (%)"),
+            y=alt.Y("price_eur:Q", title=f"Prix (EUR, notional € {int(terms.notional):,})"),
+            color=alt.Color("scenario:N", title="Scénario")
+        ).properties(height=360).interactive()
 
-        line_effective = (
-            alt.Chart(df_coupon)
-            .mark_line()
-            .encode(
-                x=alt.X("Time (years):Q", title="Time (years)"),
-                y=alt.Y("Coupon (%):Q", title="Coupon (%)"),
-                tooltip=["Time (years)", "Coupon (%)"],
-            )
-        )
+        st.altair_chart(area, use_container_width=True)
+        st.caption("Le step-up augmente légèrement les derniers coupons → soutient le prix pour un même taux.")
 
-        line_base = (
-            alt.Chart(df_coupon)
-            .mark_line(strokeDash=[6, 4])
-            .encode(
-                x="Time (years):Q",
-                y="Base coupon (%):Q",
-                tooltip=["Time (years)", "Base coupon (%)"],
-            )
-        )
+    # --- PV table (optional) ---
+    if show_pv_breakdown:
+        st.markdown("### Tableau des cash-flows actualisés")
+        y = y_base_pct / 100.0
+        df_cf = flows_step.copy()
+        df_cf["t"] = np.arange(1, len(df_cf) + 1)
+        df_cf["df"] = 1.0 / ((1 + y) ** df_cf["t"])
+        df_cf["pv_total_cf"] = df_cf["total_cf"] * df_cf["df"]
+        df_cf.rename(columns={
+            "year": "Année coupon",
+            "coupon_rate_%": "Coupon (%)",
+            "coupon_cash": "Coupon (€)",
+            "stepup_extra": "Step-up (€)",
+            "principal": "Principal (€)",
+            "total_cf": "Total CF (€)",
+            "df": "Facteur d'actualisation",
+            "pv_total_cf": "VA du CF (€)"
+        }, inplace=True)
+        st.dataframe(df_cf, use_container_width=True)
 
-        rules = (
-            alt.Chart(marks)
-            .mark_rule(size=1)
-            .encode(
-                x="Time (years):Q",
-                color=alt.Color("Status:N", scale=alt.Scale(domain=["Missed","Met"], range=["#d62728", "#2ca02c"])),
-                tooltip=["KPI","Status","Step (bp)","Time (years)"],
-            )
-        )
-
-        points = (
-            alt.Chart(marks)
-            .mark_point(filled=True, size=80)
-            .encode(
-                x="Time (years):Q",
-                y=alt.Y("y:Q", title=None),
-                color=alt.Color("Status:N", scale=alt.Scale(domain=["Missed","Met"], range=["#d62728", "#2ca02c"])),
-                shape="KPI:N",
-                tooltip=["KPI","Status","Step (bp)","Time (years)"],
-            )
-            .transform_calculate(
-                # place points at corresponding coupon level after observation (approx = current coupon at that time)
-                y=str(base_coupon_pct)
-            )
-        )
-
-        chart_slb = alt.layer(line_effective, line_base, rules, points).properties(
-            title="KPI Step-Up Timeline (Coupon path vs. Base)"
-        )
-
-        st.altair_chart(chart_slb.interactive(), use_container_width=True)
-
-    with r2:
-        # Suppression du graphique "Coupon/Profit rate path (%)" (demandé)
-        # (la colonne est laissée vide pour conserver la structure visuelle)
-        pass
-
-    # ------------------ Cash-flow table & export -----------------------------
-    st.markdown("### Cash flow table")
-    table = schedule.copy()
-    for c in ["Outstanding (begin)", "Coupon/Profit", "Principal", "Total CF", "Outstanding (end)"]:
-        table[c] = table[c].map(lambda x: round(float(x), 6))
-    st.dataframe(table, use_container_width=True)
-    st.download_button(
-        "Download cash flow table (CSV)",
-        data=table.to_csv(index=False).encode("utf-8"),
-        file_name="slb_carrefour_cash_flows.csv",
-        mime="text/csv",
-    )
-
-    # ------------------ Case Study: definitions & learn more -----------------
+    # --- Footer ---
     st.markdown("---")
-    st.markdown("## What is a Sustainability-Linked Bond (SLB)?")
     st.markdown(
         """
-- **Use of proceeds is general** (not ring-fenced) but the bond is **contractually linked to KPIs/targets**.  
-- If KPIs are **missed** at observation dates, a **coupon step-up** (e.g., +25 bp) typically applies **from then to maturity**.  
-- If KPIs are **met/over-achieved**, many frameworks keep the base coupon (some structures allow step-downs).  
-- The mechanism is documented via **Sustainability-Linked Financing Framework** and external **SPO**.
-        """
+**Lecture.** Dans un SLB, la **réalisation d’objectifs** (pas la liste de projets) pilote les **coupons futurs**.  
+Si les cibles 2030 sont atteintes → coupons restent au taux de base. Sinon → **step-up** sur 2031–2033.  
+Impact: plus de cash **tard dans la vie du bond**, donc un prix un peu plus élevé (à taux donné) et un meilleur alignement incitatif.
+"""
     )
 
-    # Learn more (modal/expander)
-    if hasattr(st, "dialog"):
-        @st.dialog("Learn more — SLB vs. Green Bond")
-        def _more():
-            _render_learn_more()
-        if st.button("Learn More"):
-            _more()
-    else:
-        with st.expander("Learn more — SLB vs. Green Bond"):
-            _render_learn_more()
-
-    # ------------------ Example PDF (Library) --------------------------------
-    st.markdown("### Example — Download")
-    pdf_path = Path(__file__).resolve().parent.parent.parent / "Library" / "SLB Example - Carrefour (2025).pdf"
-
-    if pdf_path.exists():
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                "Download: SLB Example — Carrefour (2025) (PDF)",
-                data=f.read(),
-                file_name=pdf_path.name,
-                mime="application/pdf",
-            )
-    else:
-        st.info(f"Place the case PDF at **{pdf_path}** (filename must match exactly).")
-
-def _render_learn_more():
-    st.markdown(
-        """
-### SLB vs. Green Bond (quick primer)
-- **Green Bond (GB):** use-of-proceeds is **earmarked** for eligible green projects; financial terms are **not** KPI-linked.  
-- **Sustainability-Linked Bond (SLB):** proceeds are **general corporate**; **financial characteristics** (e.g., coupon) vary with
-  **KPI performance** measured against **SBTi-aligned** or similar targets, with **observation dates** and **step-up amounts**.
-
-### How we calculate in this case study
-1) Build a per-period rate path: start from **base coupon** and add **step-ups (bp)** from each observation date **if the KPI is missed**.  
-2) Convert the per-period annual rates to cash flows (profit + principal) using the selected **frequency** and **structure**.  
-3) **Price (given Yield):** discount all cash flows at the input **YTM** (same engine as plain bonds).  
-4) **Yield (given Clean Price):** numerically solve for the YTM matching the target **clean price**.  
-5) Charts update as you toggle KPI outcomes and move sliders (observation years, step-up sizes, base coupon, etc.).
-
-> Notes: Real documentation can include **multiple check-ins**, step-up caps, **step-downs**, make-wholes, and other nuances.
-  This module keeps the mechanics **transparent for education** while matching the spirit of the Carrefour SLB.
-        """
-    )
-
-
-# =========================
-# Sources (kept as comments)
-# =========================
-# Case press release snippet: “Success of a €650m 7.9-year Sustainability-Linked Bond … coupon 3.75%,
-# indexed to two objectives: (1) GHG Scope 1&2 reduction; (2) suppliers engaged in climate strategy.”
-# (PDF placed in Library as "SLB Example - Carrefour (2025).pdf")
+# (Optionnel) exécution directe locale
+if __name__ == "__main__":
+    render()
