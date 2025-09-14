@@ -506,7 +506,6 @@ def render_macroeconomics_dashboard():
 # === REPLACED / UPDATED: Spreads chart (US−FR & FR−DE), mensuel, 10 dernières années ===
     from pathlib import Path
     import os, re
-    import pandas as pd
     from typing import Optional
 
     # --- Résolution robuste du dossier de données ---
