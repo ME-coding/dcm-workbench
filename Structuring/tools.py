@@ -316,8 +316,8 @@ def render():
     st.caption("Quick, self-contained utilities for everyday DCM tasks. No external data sources required.")
 
     tabs = st.tabs([
-        "Term Sheet Builder",
-        "Amortization Builder",
+        "📑 Term Sheet Builder",
+        "📊 Amortization Builder",
     ])
 
     with tabs[0]:

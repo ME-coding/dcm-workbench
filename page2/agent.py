@@ -241,7 +241,7 @@ def render_agent():
     _init_state()
     api_key = _get_api_key()
 
-    st.title("AI Agent")
+    st.subheader("AI Agent")
     st.caption("Chat with context. Drag & drop documents to ground the answers.")
 
     left, right = st.columns([1.05, 1.25])

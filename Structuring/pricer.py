@@ -1,18 +1,18 @@
-# Structuring_Desk/pricer.py
+## Code ## # Structuring_Desk/pricer.py
 # -----------------------------------------------------------------------------
 # Structuring Desk — Pricer (router)
 # -----------------------------------------------------------------------------
 
 import streamlit as st
 
-from Structuring.Pricer_Book.sukuk import render as sukuk_ui
+# Sukuk retiré (aucune référence restante)
 from Structuring.Pricer_Book.option_bond import render as option_bond_ui
 from Structuring.Pricer_Book.zero_coupon import render as zero_coupon_ui
 from Structuring.Pricer_Book.fixed_floating_bond import render as fixed_floating_bond_ui
 from Structuring.Pricer_Book.slb_carrefour_case import render as slb_carrefour_case_ui
 from Structuring.Pricer_Book.convertible_bond import convertible_bond_ui
 
-from .Pricer_Book.visuals import price_yield_chart
+from .Pricer_Book.visuals import price_yield_chart  # ok si utilisé par les sous-UIs
 
 st.markdown(
     """
@@ -27,10 +27,9 @@ def render():
     st.subheader("Structuring Desk — Pricer")
 
     products = [
-        "Fixed / Float / Fixed-to-Float Rate Bond",   # <— fusion des 3 choix
+        "Fixed / Float / Fixed-to-Float Rate Bond",   # fusion des 3 choix
         "Bonds with Options (Callable / Puttable)",
         "Convertible Bond (LSMC)",
-        "Sukuk (Fixed/Ijara-style)",
         "Sustainability-Linked Bond — Carrefour Case",
         "Zero-Coupon",
     ]
@@ -42,8 +41,6 @@ def render():
             "Call émetteur / put investisseur à des dates/prix prédéfinis.",
         "Convertible Bond (LSMC)":
             "Dette + option actions ; pricer par régression LSMC.",
-        "Sukuk (Fixed/Ijara-style)":
-            "Conforme à la sharia ; modèle de cash-flows ‘profit rate’ pédagogique.",
         "Sustainability-Linked Bond — Carrefour Case":
             "Coupons modulés par KPIs (Scope1&2 ; fournisseurs).",
         "Zero-Coupon":
@@ -69,10 +66,9 @@ def render():
         st.markdown('</div>', unsafe_allow_html=True)
 
     registry = {
-        "Fixed / Float / Fixed-to-Float Rate Bond": fixed_floating_bond_ui,  # <— route unique
+        "Fixed / Float / Fixed-to-Float Rate Bond": fixed_floating_bond_ui,  # route unique
         "Bonds with Options (Callable / Puttable)": option_bond_ui,
         "Convertible Bond (LSMC)": convertible_bond_ui,
-        "Sukuk (Fixed/Ijara-style)": sukuk_ui,
         "Sustainability-Linked Bond — Carrefour Case": slb_carrefour_case_ui,
         "Zero-Coupon": zero_coupon_ui,
     }

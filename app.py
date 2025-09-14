@@ -209,10 +209,8 @@ if section == "Home Page":
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Séparation claire
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # Deux colonnes + barre verticale
     col_left, col_sep, col_right = st.columns([1, 0.05, 1])
 
     with col_left:
@@ -221,10 +219,13 @@ if section == "Home Page":
         if st.button("Pricer", type="secondary", key="home_sd_pricer"):
             _goto("Structuring Desk", "Pricer")
         st.caption("Multi-product pricing tools and analytics")
-        # (removed Data Visualisation button since dataviz.py was deleted)
         if st.button("Tools", type="secondary", key="home_sd_tools"):
             _goto("Structuring Desk", "Tools")
         st.caption("Utilities for term sheets, fees, amortization")
+        # (optionnel) bouton vers Glossary
+        if st.button("Glossary & Learn More", type="secondary", key="home_sd_glossary"):
+            _goto("Structuring Desk", "Glossary & Learn More")
+        st.caption("Key concepts, definitions, references")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_sep:
@@ -245,12 +246,14 @@ elif section == "Structuring Desk":
     _render_hero_from(hero_struct_path)
 
     st.title("Structuring Desk")
-    # Removed "Data Visualisation" tab
-    tab_pricer, tab_tools = st.tabs(["Pricer", "Tools"])
+    # ⚠️ 3 onglets: Pricer, Tools, Glossary & Learn More
+    tab_pricer, tab_tools, tab_glossary = st.tabs(["Pricer", "Tools", "Glossary & Learn More"])
     with tab_pricer:
         safe_tab("Structuring.pricer", "Structuring Desk — Pricer")
     with tab_tools:
         safe_tab("Structuring.tools", "Structuring Desk — Tools")
+    with tab_glossary:
+        safe_tab("Structuring.glossary", "Structuring Desk — Glossary & Learn More")
     _maybe_select_pending_tab()
 
 elif section == "Intelligence Desk":

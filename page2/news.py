@@ -1014,7 +1014,7 @@ def render():
         st.markdown("---")
 
         # Updated tabs
-        tabs = st.tabs(["News Aggregator", "Macroeconomics Dashboard", "Deal Tracker"])
+        tabs = st.tabs(["📰 News Aggregator", "🌐 Macroeconomics Dashboard", "📌 Deal Tracker"])
 
         with tabs[0]:
             try:
