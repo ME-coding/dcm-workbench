@@ -469,7 +469,6 @@ def _latest_and_prev(df: pd.DataFrame) -> tuple[float, float]:
     prev = float(df["Close"].iloc[-2]) if len(df) > 1 else last
     return last, prev
 
-
 # =========================
 # NEW: Macroeconomics Dashboard (fusion)
 # =========================
@@ -504,8 +503,54 @@ def render_macroeconomics_dashboard():
         with cols[i]:
             st.metric(name, f"{close:,.3f}", f"{delta:+.2f}% d/d")
 
-    # === REPLACED / UPDATED: Spreads chart (US−FR & FR−DE), mensuel, 10 dernières années ===
-    DATA_DIR = r"C:\Users\Maxime\Dev\DCM_Workbench\xlx"
+# === REPLACED / UPDATED: Spreads chart (US−FR & FR−DE), mensuel, 10 dernières années ===
+    from pathlib import Path
+    import os, re
+    import pandas as pd
+    from typing import Optional
+
+    # --- Résolution robuste du dossier de données ---
+    def _find_dir_up(start: Path, target_dirname: str) -> Path | None:
+        """Remonte depuis 'start' pour trouver un dossier nommé 'target_dirname'."""
+        cur = start
+        for _ in range(6):  # remonte quelques niveaux
+            candidate = cur / target_dirname
+            if candidate.exists() and candidate.is_dir():
+                return candidate.resolve()
+            if cur.parent == cur:
+                break
+            cur = cur.parent
+        return None
+
+    def _get_data_dir() -> Path:
+        # a) via st.secrets si défini
+        try:
+            import streamlit as st
+            if "DATA_DIR" in st.secrets:
+                p = Path(st.secrets["DATA_DIR"]).expanduser().resolve()
+                if p.exists():
+                    return p
+        except Exception:
+            pass
+
+        # b) via variable d'environnement
+        env_p = os.getenv("DATA_DIR")
+        if env_p:
+            p = Path(env_p).expanduser().resolve()
+            if p.exists():
+                return p
+
+        # c) recherche d'un dossier 'xlx' en remontant depuis ce fichier
+        here = Path(__file__).resolve()
+        found = _find_dir_up(here.parent, "xlx")
+        if found:
+            return found
+
+        # d) fallback: CWD/xlx (utile sur certains runners)
+        return (Path.cwd() / "xlx").resolve()
+
+    # Chemin utilisé (string pour compatibilité os.path.join)
+    DATA_DIR = str(_get_data_dir())
 
     def _pick_file(patterns: list[str]) -> Optional[str]:
         try:
