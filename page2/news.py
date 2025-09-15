@@ -685,7 +685,7 @@ def render_macroeconomics_dashboard():
                            title="Spread (percentage points)",
                            scale=alt.Scale(zero=False)
                        ),
-                       color=alt.Color("Series:N", legend=alt.Legend(title=None)),
+                       color=alt.Color("Series:N", legend=alt.Legend(title=None, orient="bottom")),
                        tooltip=[
                            alt.Tooltip("Date:T"),
                            alt.Tooltip("Series:N"),

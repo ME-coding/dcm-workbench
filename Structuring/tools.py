@@ -273,7 +273,7 @@ def tool_amortization():
     bars = alt.Chart(bars_df).mark_bar().encode(
         x=alt.X("Time (years):Q", title="Time (years)"),
         y=alt.Y("Amount:Q", stack="zero", title="Cashflow"),
-        color=alt.Color("Component:N", sort=["Interest/Coupon", "Principal"]),
+        color=alt.Color("Component:N", sort=["Interest/Coupon", "Principal"], legend=alt.Legend(title=None,orient="bottom")),
         tooltip=[
             alt.Tooltip("Period:Q"),
             alt.Tooltip("Time (years):Q", format=",.2f"),
