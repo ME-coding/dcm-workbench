@@ -401,104 +401,83 @@ def tool_amortization():
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        notional = st.number_input(
-            "Notional", min_value=1000.0, value=100_000.0,
-            step=1000.0, format="%.2f", key="amort_notional"
-        )
+        notional = st.number_input("Notional", min_value=1000.0, value=100_000.0,
+                                   step=1000.0, format="%.2f", key="amort_notional")
     with c2:
-        rate = st.number_input(
-            "Rate (annual, %)", min_value=0.0, value=4.00,
-            step=0.10, format="%.4f", key="amort_rate"
-        )
+        rate = st.number_input("Rate (annual, %)", min_value=0.0, value=4.00,
+                               step=0.10, format="%.4f", key="amort_rate")
     with c3:
-        years = st.number_input(
-            "Maturity (years)", min_value=0.25, value=5.0,
-            step=0.25, format="%.2f", key="amort_years"
-        )
+        years = st.number_input("Maturity (years)", min_value=0.25, value=5.0,
+                                step=0.25, format="%.2f", key="amort_years")
     with c4:
-        freq_label = st.selectbox(
-            "Frequency", sorted(["Annual", "Semi-annual", "Quarterly"]),
-            index=1, key="amort_freq_label"
-        )
+        freq_label = st.selectbox("Frequency", sorted(["Annual", "Semi-annual", "Quarterly"]),
+                                  index=1, key="amort_freq_label")
         f_map = {"Annual": 1, "Semi-annual": 2, "Quarterly": 4}
         f = f_map[freq_label]
 
-    structure = st.selectbox(
-        "Structure", sorted(["bullet", "equal_principal", "annuity"]),
-        index=2, key="amort_structure"
-    )
+    structure = st.selectbox("Structure", sorted(["bullet", "equal_principal", "annuity"]),
+                             index=2, key="amort_structure")
 
-    # Build amortization schedule
     df = build_amortization(notional, rate / 100.0, years, f, structure)
 
-    st.dataframe(
-        df.style.format({
-            "Outstanding (begin)": "{:,.2f}",
-            "Interest/Coupon": "{:,.2f}",
-            "Principal": "{:,.2f}",
-            "Total": "{:,.2f}",
-            "Outstanding (end)": "{:,.2f}",
-        }),
-        use_container_width=True
-    )
+    st.dataframe(df.style.format({
+        "Outstanding (begin)": "{:,.2f}",
+        "Interest/Coupon": "{:,.2f}",
+        "Principal": "{:,.2f}",
+        "Total": "{:,.2f}",
+        "Outstanding (end)": "{:,.2f}",
+    }), use_container_width=True)
 
-    # ---- Chart: Stacked bars (cashflows) + line (outstanding)
+    # ---- Data for stacked bars
     bars_df = df.melt(
         id_vars=["Period", "Time (years)", "Outstanding (end)"],
         value_vars=["Principal", "Interest/Coupon"],
-        var_name="Component", value_name="Amount",
+        var_name="Component", value_name="Amount"
     )
 
-    bars = (
-        alt.Chart(bars_df)
-        .mark_bar()
-        .encode(
-            x=alt.X("Time (years):Q", title="Time (years)"),
-            y=alt.Y("Amount:Q", stack="zero", title="Cashflow"),
-            color=alt.Color(
-                "Component:N",
-                sort=["Interest/Coupon", "Principal"],
-                legend=alt.Legend(title=None, orient="bottom"),
-            ),
-            tooltip=[
-                alt.Tooltip("Period:Q"),
-                alt.Tooltip("Time (years):Q", format=",.2f"),
-                alt.Tooltip("Component:N"),
-                alt.Tooltip("Amount:Q", format=",.2f"),
-            ],
-        )
+    # ---- Title outside the chart (prevents clipping)
+    st.markdown("##### Cashflows (stacked) & Outstanding profile")
+
+    # ---- Bars (legend at bottom)
+    bars = alt.Chart(bars_df).mark_bar().encode(
+        x=alt.X("Time (years):Q", title="Time (years)"),
+        y=alt.Y("Amount:Q", stack="zero", title="Cashflow"),
+        color=alt.Color(
+            "Component:N",
+            sort=["Interest/Coupon", "Principal"],
+            legend=alt.Legend(title=None, orient="bottom")
+        ),
+        tooltip=[
+            alt.Tooltip("Period:Q"),
+            alt.Tooltip("Time (years):Q", format=",.2f"),
+            alt.Tooltip("Component:N"),
+            alt.Tooltip("Amount:Q", format=",.2f"),
+        ],
     )
 
-    line = (
-        alt.Chart(df)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("Time (years):Q", title="Time (years)"),
-            y=alt.Y(
-                "Outstanding (end):Q",
-                title="Outstanding",
-                axis=alt.Axis(orient="right")  # <<< axe à droite (évite le rognage)
-            ),
-            tooltip=[
-                alt.Tooltip("Period:Q"),
-                alt.Tooltip("Time (years):Q", format=",.2f"),
-                alt.Tooltip("Outstanding (end):Q", format=",.2f"),
-            ],
-        )
+    # ---- Line (right axis)
+    line = alt.Chart(df).mark_line(point=True).encode(
+        x=alt.X("Time (years):Q"),
+        y=alt.Y(
+            "Outstanding (end):Q",
+            title="Outstanding",
+            axis=alt.Axis(orient="right", labelAlign="left", labelPadding=4, titlePadding=8)
+        ),
+        tooltip=[
+            alt.Tooltip("Period:Q"),
+            alt.Tooltip("Time (years):Q", format=",.2f"),
+            alt.Tooltip("Outstanding (end):Q", format=",.2f"),
+        ],
     )
 
     chart = (
         alt.layer(bars, line)
-        .resolve_scale(y="independent")  # barres à gauche, ligne à droite
-        .properties(height=380, title="Cashflows (stacked) & Outstanding profile")
-        .configure_legend(orient="bottom", direction="horizontal", columns=2)
-        .configure_title(anchor="start", offset=12)
-        .configure_view(strokeOpacity=0)  # look plus clean
-        .configure(
-            autosize="pad",
-            padding={"left": 56, "right": 88, "top": 8, "bottom": 72},  # <<< plus d'espace à droite & en bas
-        )
-        .interactive()
+          .resolve_scale(y="independent")
+          .properties(height=360)                # no Altair title inside
+          .configure_legend(orient="bottom", direction="horizontal")
+          .configure(autosize="pad",
+                     padding={"left": 40, "right": 80, "top": 4, "bottom": 64})
+          .interactive()
     )
 
     st.altair_chart(chart, use_container_width=True)
