@@ -694,7 +694,7 @@ def render_macroeconomics_dashboard():
                    ),
                 zero_line
             )
-            .properties(height=260)   # <-- plus de title Altair ici
+            .properties(height=360)   # <-- plus de title Altair ici
             .interactive()
         )
 

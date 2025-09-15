@@ -70,6 +70,12 @@ def build_amortization(notional: float, rate_annual: float, years: float, freq: 
 # =========================
 # TOOL 1 — Term Sheet Builder
 # =========================
+from pathlib import Path
+import os
+import io
+from datetime import date
+from typing import Dict, Any
+import streamlit as st
 
 # --- Optional deps (docxtpl) ---
 try:
@@ -77,6 +83,61 @@ try:
     DOCTPL_OK = True
 except Exception:
     DOCTPL_OK = False
+
+# --- Helper: robust template resolver ---
+def _find_termsheet_template() -> str:
+    """
+    Resolve a portable path to 'Termsheet-Example.docx'.
+    Order:
+      1) st.secrets["TERMSHEET_TEMPLATE"]
+      2) env var TEMPLATE_PATH
+      3) <module_dir>/Library/Termsheet-Example.docx
+      4) CWD/Library/Termsheet-Example.docx
+      5) ascend a few levels to find a 'Library' folder containing the file
+    """
+    filename = "Termsheet-Example.docx"
+
+    # 1) st.secrets
+    try:
+        if "TERMSHEET_TEMPLATE" in st.secrets:
+            p = Path(st.secrets["TERMSHEET_TEMPLATE"]).expanduser().resolve()
+            if p.is_file():
+                return str(p)
+    except Exception:
+        pass
+
+    # 2) env var
+    env_p = os.getenv("TEMPLATE_PATH")
+    if env_p:
+        p = Path(env_p).expanduser().resolve()
+        if p.is_file():
+            return str(p)
+
+    # 3) relative to this file
+    here = Path(__file__).resolve()
+    p3 = here.parent / "Library" / filename
+    if p3.is_file():
+        return str(p3)
+
+    # 4) current working dir (when Streamlit sets CWD to repo root)
+    p4 = Path.cwd() / "Library" / filename
+    if p4.is_file():
+        return str(p4)
+
+    # 5) ascend a few levels to find a Library folder with the file
+    cur = here.parent
+    for _ in range(6):
+        cand = cur / "Library" / filename
+        if cand.is_file():
+            return str(cand.resolve())
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+
+    raise FileNotFoundError(
+        f"Template not found: '{filename}'. "
+        "Ensure it is committed at 'Library/Termsheet-Example.docx' (case-sensitive on Linux)."
+    )
 
 # --- Helper: render Word from template with context ---
 def _render_termsheet_docx(template_path: str, context: Dict[str, Any]) -> bytes:
@@ -209,7 +270,12 @@ def tool_termsheet():
     }
 
     # === Génération Word ===
-    template_path = r"C:\Users\Maxime\Dev\DCM_Workbench\Library\Termsheet-Example.docx"
+    try:
+        template_path = _find_termsheet_template()
+    except FileNotFoundError as e:
+        st.error(str(e))
+        return  # ou st.stop()
+
     if not DOCTPL_OK:
         st.error("`docxtpl` n'est pas installé. Installe-le avec: `pip install docxtpl`")
 
@@ -223,8 +289,6 @@ def tool_termsheet():
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 key="ts_docx_download",
             )
-        except FileNotFoundError as e:
-            st.error(str(e))
         except Exception as e:
             st.error(f"Word generation failed: {e}")
 
@@ -273,7 +337,11 @@ def tool_amortization():
     bars = alt.Chart(bars_df).mark_bar().encode(
         x=alt.X("Time (years):Q", title="Time (years)"),
         y=alt.Y("Amount:Q", stack="zero", title="Cashflow"),
-        color=alt.Color("Component:N", sort=["Interest/Coupon", "Principal"], legend=alt.Legend(title=None,orient="bottom")),
+        color=alt.Color(
+            "Component:N",
+            sort=["Interest/Coupon", "Principal"],
+            legend=alt.Legend(title=None, orient="bottom")
+        ),
         tooltip=[
             alt.Tooltip("Period:Q"),
             alt.Tooltip("Time (years):Q", format=",.2f"),
@@ -292,10 +360,28 @@ def tool_amortization():
         ],
     )
 
-    chart = alt.layer(bars, line).resolve_scale(y="independent").properties(
-        height=360,
-        title="Cashflows (stacked) & Outstanding profile"
-    ).interactive()  # active zoom & pan natif
+    chart = (
+        alt.layer(bars, line)
+          .resolve_scale(y="independent")
+          .properties(
+              height=360,
+              title="Cashflows (stacked) & Outstanding profile"
+          )
+          .configure_legend(
+              orient="bottom",
+              direction="horizontal",
+              columns=2      # optionnel, compacte la légende
+          )
+          .configure_title(
+              anchor="start",  # ancre le titre au cadre gauche
+              offset=12        # espace titre -> tracé
+          )
+          .configure(
+              autosize="pad",
+              padding={"left": 40, "right": 16, "top": 8, "bottom": 64}
+          )
+          .interactive()
+    )
 
     st.altair_chart(chart, use_container_width=True)
 
