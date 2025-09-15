@@ -798,15 +798,21 @@ def render_central_banks():
     # Removed RSS table of central banks news per request
 
 # =======================================================
-# Deal Watch
+# Deal Watch (DCM-hardened)
 # =======================================================
+
+try:
+    import requests  # pip install requests
+except Exception:
+    requests = None
 
 def render_deal_watch():
     from datetime import datetime  # utilisé pour l'affichage horaire local
     from html import unescape as _unescape
 
     st.markdown("#### Deal Tracker")
-    st.caption("Auto-pulls bond issuance press releases via RSS (editable), filters by keywords, and shows latest issuers.")
+    st.caption("Auto-pulls bond issuance press releases via RSS (editable), filters by keywords, and shows latest issuers. \
+Only headlines that combine a DCM instrument AND a primary action verb are kept. Non-DCM 'platform/product launches' are excluded.")
 
     # --- 6 deal sources par défaut (éditables) ---
     deal_sources = {
@@ -817,9 +823,29 @@ def render_deal_watch():
         "Euronext — News": "https://live.euronext.com/en/rss_feed/news",
         "London Stock Exchange — RNS (All)": "https://www.londonstockexchange.com/exchange/feeds/rss/news.xml",
     }
-    # --- Filtres (cachés) ---
-    default_kw = r"bond|notes|covered|green bond|sustainability|subordinated|hybrid|AT1|Tier 2|senior|convertible|syndicated|benchmark|tap|midswap|spread|coupon|maturity|issuance|new issue|priced|pricing|launch"
-    kw = default_kw  # pas d'UI
+
+    # ======= Filtrage DCM: lookaheads (INSTRUMENT & ACTION) + NEGATIVES =======
+    # Instruments DCM
+    _INSTRUMENT = r"(?:green\s+bond|sustainability[-\s]?linked|sustainability|social|transition|sukuk|bond|notes?|debenture|schuldschein|covered|mortgage[-\s]?backed|abs|mbs|emtn|eurobond|private\s+placement|ppn|at1|additional\s+tier\s*1|tier\s*2|subordinated|senior(?!\s+living)|convertible|exchangeable)"
+    # Verbes d'action primaires
+    _ACTION = r"(?:announce[sd]?|price[sd]?|launch(?:ed|es|ing)?|issue[sd]?|offer[sd]?|tap(?:ped|s)?|reopen(?:ed|s|ing)?|upsiz(?:e|ed|es|ing)|book(?:build|built|building)|mandate[sd]?|appoints?\s+bookrunners?)"
+    # Taille/tenor (optionnel, mais utile pour réduire le bruit)
+    _SIZE = r"(?:\$\s?\d+|\d+\s?(?:bn|billion|m|million|mm|€|eur|usd|gbp|chf|cad|aud)|\b\d{2,4}\s?(?:year|yr|ans)\b)"
+    # Exclusions communes (non-DCM)
+    _NEGATIVE = r"(?:platform|software|app|webinar|token|crypto|nft|ai\s+model|partnership|conference|award|etf|equity|stock|ipo|dividend|earnings|results|buyback|share\s+repurchase|product\s+launch|clinical\s+trial|vaccine|gaming|e-?commerce)"
+
+    # Filtre principal : doit contenir (instrument & action), NE doit PAS contenir negatives
+    DCM_PATTERN = re.compile(
+        rf"(?is)^(?=.*\b{_INSTRUMENT}\b)(?=.*\b{_ACTION}\b)(?!.*\b{_NEGATIVE}\b).*"
+    )
+
+    def _is_dcm_headline(title: str) -> bool:
+        if not isinstance(title, str) or not title.strip():
+            return False
+        t = title.strip()
+        if not DCM_PATTERN.search(t):
+            return False
+        return True
 
     limit = st.number_input("Items per feed", min_value=5, max_value=50, value=15, step=5)
 
@@ -856,7 +882,37 @@ def render_deal_watch():
         "UniCredit": ["UniCredit"],
         "Santander": ["Santander", "Banco Santander"],
         "BBVA": ["BBVA"],
+
+        # ===== Ajouts (deal Great Elm) =====
+        "Lucid Capital Markets": [
+            "Lucid Capital Markets",
+            "Lucid Capital Markets LLC",
+            "Lucid Capital Markets, LLC"
+        ],
+        "Piper Sandler": [
+            "Piper Sandler",
+            "Piper Sandler & Co.",
+            "Piper Sandler & Co",
+            "Piper Sandler and Co."
+        ],
+        "Clear Street": [
+            "Clear Street",
+            "Clear Street LLC",
+            "Clear Street, LLC"
+        ],
+        "InspereX": [
+            "InspereX",
+            "InspereX LLC",
+            "Insperex",          # tolère la casse/orthographe sans majuscule interne
+            "Insperex LLC"
+        ],
+        "Janney Montgomery Scott": [
+            "Janney Montgomery Scott",
+            "Janney Montgomery Scott LLC",
+            "Janney"
+        ],
     }
+
     # mapping "synonyme -> canonique"
     ALT_TO_CANON = {}
     for canon, alts in BANK_SYNONYMS.items():
@@ -871,6 +927,7 @@ def render_deal_watch():
             esc = esc.replace(r"\ ", r"\s+")  # tolère espaces multiples
             parts.append(esc)
         return parts
+
     BANK_PATTERN = re.compile(
         r"(?<![A-Za-z])(?:%s)(?![A-Za-z])" % "|".join(
             _alts_to_regex_parts([k for sub in BANK_SYNONYMS.values() for k in sub])
@@ -880,7 +937,7 @@ def render_deal_watch():
 
     def _extract_banks_from_text(text: str) -> list[str]:
         hits = []
-        for m in BANK_PATTERN.finditer(text):
+        for m in BANK_PATTERN.finditer(text or ""):
             canon = ALT_TO_CANON.get(m.group(0).lower())
             if canon:
                 hits.append(canon)
@@ -890,14 +947,15 @@ def render_deal_watch():
     # Récupération du HTML de l'article et conversion en texte brut
     if "deal_article_cache" not in st.session_state:
         st.session_state.deal_article_cache = {}
+
     def _fetch_article_plaintext(url: str) -> str:
         # cache simple
         cache = st.session_state.deal_article_cache
         if url in cache:
             return cache[url]
-        if 'requests' in globals() and requests is not None:
+        if 'requests' in globals() and requests is not None and isinstance(url, str) and url.startswith("http"):
             try:
-                hdr = {"User-Agent": "Mozilla/5.0 (DealTracker/1.0)"}
+                hdr = {"User-Agent": "Mozilla/5.0 (DealTracker/1.1)"}
                 r = requests.get(url, timeout=8, headers=hdr)
                 r.raise_for_status()
                 html = r.text
@@ -913,34 +971,43 @@ def render_deal_watch():
         cache[url] = text
         return text
 
+    # Extraction d'émetteur : seulement si le titre passe le filtre DCM
+    _VERBS = r"(?:announces?|prices?|launches?|issues?|offers?|files|to\s+issue|to\s+offer|mandates?|appoints?)"
+    ISSUER_VERB_RE = re.compile(rf"^(.*?)(?:\s+){_VERBS}\b", re.IGNORECASE)
+
     def _extract_issuer(title: str) -> str | None:
-        t = re.sub(r"\s+", " ", title).strip()
+        if not _is_dcm_headline(title):
+            return None
+        t = re.sub(r"\s+", " ", title or "").strip()
         # supprime les tickers entre parenthèses
         t = re.sub(r"\((?:NASDAQ|NYSE|EPA|LSE|TSX|SIX|FWB|XETRA|HKEX|ASX|BME)[^)]*\)", "", t, flags=re.IGNORECASE)
-        m = re.search(r"^(.*?)(?:\s+)(announces|prices?|launches|issues?|offers?|files|to issue|to offer)\b", t, flags=re.IGNORECASE)
-        cand = m.group(1).strip(" -—:;,.") if m else None
+        # coupe les slogans/tags après ":" "—" "-"
+        t = t.split(" | ")[0]
+        # pattern principal
+        m = ISSUER_VERB_RE.search(t)
+        cand = m.group(1).strip(" -—:;,.\u2013\u2014") if m else None
         if not cand:
+            # fallback: avant les deux-points / tirets
             cand = t.split(":")[0].split("—")[0].split("-")[0].strip()
-        if cand and len(cand.split()) <= 8 and not cand.lower().startswith(("press release", "company", "the ")):
+        # heuristique: ignorer si trop générique
+        if cand and 1 <= len(cand.split()) <= 8 and not cand.lower().startswith(("press release", "company", "the ")):
             return cand
         return None
 
-    def _join_and(names: list[str]) -> str:
-        if not names:
-            return ""
-        if len(names) == 1:
-            return names[0]
-        return ", ".join(names[:-1]) + " and " + names[-1]
-
     if not df.empty:
-        # Filtre mots-clés
-        mask = df["title"].str.contains(kw, case=False, na=False, regex=True)
+        # Filtre DCM (au lieu de regex large initiale)
+        mask = df["title"].apply(_is_dcm_headline)
         df = df[mask].copy()
 
+        if df.empty:
+            st.info("No DCM-style headlines detected (try adjusting sources or broaden the filter).")
+            return
+
+        # Affichages
         df["Time"] = df["published"].dt.tz_convert("Europe/Paris").dt.strftime("%Y-%m-%d %H:%M")
         df["Issuer"] = df["title"].apply(_extract_issuer)
 
-        # 1) banques depuis le titre (souvent vide)
+        # 1) banques depuis le titre
         df["Banks_title"] = df["title"].apply(_extract_banks_from_text)
 
         # 2) banques depuis l'article (limite de requêtes pour rester léger)
@@ -963,7 +1030,8 @@ def render_deal_watch():
         def _merge_banks(row) -> list[str]:
             seen = {}
             for b in (row.get("Banks_title", []) or []) + (row.get("Banks_page", []) or []):
-                seen[b] = True
+                if b:
+                    seen[b] = True
             # tri alpha pour stabilité
             return sorted(seen.keys(), key=lambda x: x.lower())
 
@@ -973,14 +1041,14 @@ def render_deal_watch():
         view = df[["Time", "source", "title", "link"]].rename(columns={"source": "Source", "title": "Title", "link": "Link"})
         _render_clickable_table(view)
 
-        # ---------- Nouveau : panneau des derniers émetteurs + banques détectées ----------
+        # ---------- Panneau des derniers émetteurs + banques détectées ----------
         issuers_lines = []
         for _, row in df.sort_values("published", ascending=False).iterrows():
             issuer = row.get("Issuer")
             banks = row.get("Banks") or []
             if issuer:
                 if banks:
-                    issuers_lines.append(f"{issuer} ({_join_and(banks)})")
+                    issuers_lines.append(f"{issuer} ({', '.join(banks[:-1]) + ' and ' + banks[-1] if len(banks) > 1 else banks[0]})")
                 else:
                     issuers_lines.append(issuer)
         issuers_lines = list(dict.fromkeys(issuers_lines))  # unique, ordre conservé
@@ -989,9 +1057,7 @@ def render_deal_watch():
             st.markdown("**Latest issuers detected**")
             st.markdown("- " + "\n- ".join(issuers_lines[:25]))
         else:
-            st.info("No clear issuer names detected in headlines (try editing sources or keywords).")
-
-        # (toujours pas de bouton CSV)
+            st.info("No clear issuer names detected in headlines that passed the DCM filter.")
     else:
         st.info("No deal headlines fetched yet. Edit/add sources if needed.")
 
