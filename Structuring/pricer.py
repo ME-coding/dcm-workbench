@@ -1,4 +1,7 @@
 # --- imports ---
+
+import streamlit as st
+
 from Structuring.Pricer_Book.vanilla_bond import render as vanilla_bond_ui
 from Structuring.Pricer_Book.convertibles_options import render as conv_opt_ui
 from Structuring.Pricer_Book.slb import render as slb_ui
