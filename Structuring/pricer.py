@@ -16,16 +16,16 @@ def render():
 
     tabs = st.tabs([
         "🧾 Vanilla Bond",
+        "0️⃣ Zero-Coupon",
         "🔀 Convertible & Options",
-        "🌿 Sustainability-Linked Bond",
-        "0️⃣ Zero-Coupon",              # NEW
+        "🌿 Sustainability-Linked Bond",              # NEW
     ])
 
     with tabs[0]:
         vanilla_bond_ui()
     with tabs[1]:
-        conv_opt_ui()
-    with tabs[2]:
-        slb_ui()
-    with tabs[3]:                        # NEW
         zero_coupon_ui()
+    with tabs[2]:
+        conv_opt_ui()
+    with tabs[3]:                        # NEW
+        slb_ui()
