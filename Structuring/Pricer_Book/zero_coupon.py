@@ -348,7 +348,7 @@ def render():
               )
         )
 
-        dual_axis = alt.layer(bars, line).resolve_scale(y='independent').properties(height=380).interactive()
+        dual_axis = alt.layer(bars, line).resolve_scale(y='independent').properties(height=380).interactive(bind_y=False)
         st.altair_chart(dual_axis, use_container_width=True)
 
         # Explanation block
@@ -440,6 +440,7 @@ def render():
                   tooltip=[alt.Tooltip("Year:Q"), alt.Tooltip("RatePct:Q", format=",.2f")]
               )
               .properties(height=460)   # taller, fixed (non-interactive)
+              
         )
         st.altair_chart(chart, use_container_width=True)
 

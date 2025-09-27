@@ -276,7 +276,7 @@ def render():
               )
         )
 
-        dual_axis = alt.layer(bars, line).resolve_scale(y='independent').properties(height=420).interactive()
+        dual_axis = alt.layer(bars, line).resolve_scale(y='independent').properties(height=420).interactive(bind_y=False)
         st.altair_chart(dual_axis, use_container_width=True)
 
         # --- Grey explanation block below the chart (clarified "Line") ---

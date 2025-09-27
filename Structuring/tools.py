@@ -380,7 +380,7 @@ def tool_amortization():
               autosize="pad",
               padding={"left": 40, "right": 16, "top": 8, "bottom": 64}
           )
-          .interactive()
+          .interactive(bind_y=False)
     )
 
     st.altair_chart(chart, use_container_width=True)
@@ -477,7 +477,7 @@ def tool_amortization():
           .configure_legend(orient="bottom", direction="horizontal")
           .configure(autosize="pad",
                      padding={"left": 40, "right": 80, "top": 4, "bottom": 64})
-          .interactive()
+          .interactive(bind_y=False)
     )
 
     st.altair_chart(chart, use_container_width=True)
