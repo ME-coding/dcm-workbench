@@ -27,8 +27,8 @@ class ZCSpec:
     vol: float = 0.01          # short-rate volatility
     theta: float = 0.02        # long-run level (constant drift term)
     dt: float = 1/252          # time step in years (e.g., daily ~ 1/252)
-    n_paths: int = 10_000      # number of Monte Carlo paths
-    seed: Optional[int] = 42
+    n_paths: int = 5_000      # number of Monte Carlo paths
+    seed: Optional[int] = 32
 
 
 # ---------- Spot curve helpers (Analytical pricing) ----------
@@ -247,7 +247,7 @@ def render():
             dt_val = {"Daily (~1/252)": 1/252, "Weekly (~1/52)": 1/52, "Monthly (~1/12)": 1/12}[dt]
 
             _label_with_help("Number of paths", "Monte Carlo scenarios to average over; more paths reduce statistical noise.")
-            n_paths = int(st.number_input("Number of paths", value=10000, step=1000, key=W + "npaths", label_visibility="collapsed"))
+            n_paths = int(st.number_input("Number of paths", value=5000, step=1000, key=W + "npaths", label_visibility="collapsed"))
 
             _label_with_help("Random seed", "Locks randomness for repeatable results.")
             seed = int(st.number_input("Random seed", value=42, step=1, key=W + "seed", label_visibility="collapsed"))

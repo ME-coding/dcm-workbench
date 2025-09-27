@@ -480,29 +480,105 @@ def render_macroeconomics_dashboard():
     # --- Policy rates table: fetch & display inside fetch_policy_rates (no duplicate table) ---
     _ = fetch_policy_rates()
 
+    # ---------- Latest levels (10Y) — corrected (real data only; English labels; date shown) ----------
     st.markdown("##### Latest levels (10Y)")
-    # Keep only these 4 series
-    symbols = {
-        "DE 10Y Bund (%)": "DE10Y.BOND",
-        "FR 10Y OAT (%)":  "FR10Y.BOND",
-        "UK 10Y Gilt (%)": "GB10Y.BOND",
-        "US 10Y UST (%)":  "^TNX",
-    }
-    data = fetch_prices(symbols, period="1y", interval="1d")
 
+    # Clear English labels
+    SYMBOLS_YF = {
+        "German 10Y Bund Yield (%)":   "DE10Y.BOND",
+        "French 10Y OAT Yield (%)":    "FR10Y.BOND",
+        "UK 10Y Gilt Yield (%)":       "GB10Y.BOND",
+        "US 10Y Treasury Yield (%)":   "^TNX",   # TNX = tenths of a percent
+    }
+
+    # FRED fallback (US daily, others monthly OECD/MEI)
+    FRED_SERIES = {
+        "US 10Y Treasury Yield (%)":   "DGS10",
+        "German 10Y Bund Yield (%)":   "IRLTLT01DEM156N",
+        "French 10Y OAT Yield (%)":    "IRLTLT01FRM156N",
+        "UK 10Y Gilt Yield (%)":       "IRLTLT01GBM156N",
+    }
+
+    def _clean_yf_df(df: pd.DataFrame) -> pd.DataFrame | None:
+        if df is None or df.empty:
+            return None
+        if "Close" in df.columns:
+            s = df["Close"]
+        elif "Adj Close" in df.columns:
+            s = df["Adj Close"]
+        else:
+            num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+            if not num_cols:
+                return None
+            s = df[num_cols[0]]
+        out = pd.DataFrame({"Date": df.index, "Close": pd.to_numeric(s, errors="coerce")})
+        out = out.dropna().reset_index(drop=True)
+        return out if not out.empty else None
+
+    def fetch_yf_one(ticker: str, period="1y", interval="1d") -> pd.DataFrame | None:
+        if yf is None:
+            return None
+        try:
+            df = yf.download(ticker, period=period, interval=interval, auto_adjust=False, progress=False)
+            return _clean_yf_df(df)
+        except Exception:
+            return None
+
+    def fetch_fred_series(series_id: str) -> pd.DataFrame | None:
+        if requests is None:
+            return None
+        url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+        try:
+            r = requests.get(url, timeout=12)
+            r.raise_for_status()
+            raw = pd.read_csv(io.StringIO(r.text))
+            date_col, val_col = raw.columns[0], raw.columns[1]
+            df = pd.DataFrame({
+                "Date": pd.to_datetime(raw[date_col], errors="coerce"),
+                "Close": pd.to_numeric(raw[val_col], errors="coerce"),
+            }).dropna().sort_values("Date").reset_index(drop=True)
+            return df if not df.empty else None
+        except Exception:
+            return None
+
+    # Fetch real data (Yahoo -> FRED fallback)
+    real_data: dict[str, pd.DataFrame] = {}
+    for name, ticker in SYMBOLS_YF.items():
+        df = fetch_yf_one(ticker, period="1y", interval="1d")
+        if df is not None and not df.empty:
+            if name == "US 10Y Treasury Yield (%)":
+                df = df.copy()
+                df["Close"] = df["Close"] / 10.0  # TNX tenths → %
+            real_data[name] = df
+        else:
+            sid = FRED_SERIES.get(name)
+            df_fred = fetch_fred_series(sid) if sid else None
+            if df_fred is not None and not df_fred.empty:
+                real_data[name] = df_fred
+
+    # Render KPIs with date (mm/dd/yyyy)
     cols = st.columns(4)
-    ordered_names = list(symbols.keys())
-    for i, name in enumerate(ordered_names):
-        df = data.get(name, pd.DataFrame())
-        if getattr(df, "empty", True):
-            continue
-        close, prev = _latest_and_prev(df)
-        if name.startswith("US "):
-            close /= 10.0
-            prev /= 10.0
-        delta = pct_change(close, prev)
+    for i, name in enumerate(SYMBOLS_YF.keys()):
+        df = real_data.get(name)
         with cols[i]:
-            st.metric(name, f"{close:,.3f}", f"{delta:+.2f}% d/d")
+            if df is None or df.empty:
+                st.metric(label=name, value="n/a", delta="n/a")
+                st.caption("Data as of —")
+                continue
+
+            close, prev = _latest_and_prev(df)
+
+            # Daily vs monthly tag (simple gap heuristic)
+            if len(df) >= 2:
+                delta_days = (df["Date"].iloc[-1] - df["Date"].iloc[-2]).days
+            else:
+                delta_days = 1
+            delta_tag = "m/m" if delta_days >= 15 else "d/d"
+
+            st.metric(label=name, value=f"{close:,.3f}", delta=f"{pct_change(close, prev):+.2f}% {delta_tag}")
+
+            asof = pd.to_datetime(df["Date"].iloc[-1])
+            st.caption(f"Data as of {asof.strftime('%m/%d/%Y')}")
 
 # === REPLACED / UPDATED: Spreads chart (US−FR & FR−DE), mensuel, 10 dernières années ===
     from pathlib import Path
@@ -706,8 +782,6 @@ def render_macroeconomics_dashboard():
             "Source: OECD/MEI via FRED — US: IRLTLT01USM156N, FR: IRLTLT01FRM156N, DE: IRLTLT01DEM156N. "
             "Voir FRED (US 10Y): https://fred.stlouisfed.org/series/IRLTLT01USM156N#:~:text=Observations"
         )
-        # # FRED source link (as requested):
-        # https://fred.stlouisfed.org/series/IRLTLT01USM156N#:~:text=Observations
 
         # Tableau QA enrichi
         with st.expander("Latest observations (QA)"):
@@ -717,67 +791,7 @@ def render_macroeconomics_dashboard():
     except Exception as e:
         st.error(f"US–FR / FR–DE 10Y spreads error: {e}")
 
-    # === END UPDATED ===
-
-
-# (Legacy sections kept unchanged for the rest of the app, but no longer used in tabs)
-def render_rates_dashboard():
-    st.markdown("#### Rates & markets dashboard")
-    st.caption("Focus Europe. Yahoo Finance when available; otherwise demo series. Axes auto-rescaled for better readability.")
-
-    euro_symbols = {
-        "DE 10Y Bund (%)": "DE10Y.BOND",
-        "FR 10Y OAT (%)":  "FR10Y.BOND",
-        "IT 10Y BTP (%)":  "IT10Y.BOND",
-        "ES 10Y Bonos (%)":"ES10Y.BOND",
-        "UK 10Y Gilt (%)": "GB10Y.BOND",
-    }
-    fx_symbols = {"EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X"}
-    show_us = st.toggle("Include U.S. Treasuries section", value=False)
-    us_symbols = {
-        "US 5Y UST (%)":  "^FVX",
-        "US 10Y UST (%)": "^TNX",
-        "US 30Y UST (%)": "^TYX",
-    } if show_us else {}
-
-    symbols = {**euro_symbols, **fx_symbols, **us_symbols}
-    data = fetch_prices(symbols, period="1y", interval="1d")
-
-    st.markdown("##### Latest levels")
-    cols = st.columns(3)
-    ordered_names = list(euro_symbols.keys()) + list(fx_symbols.keys()) + list(us_symbols.keys())
-    for i, name in enumerate(ordered_names):
-        df = data.get(name, pd.DataFrame())
-        if getattr(df, "empty", True):
-            continue
-        close, prev = _latest_and_prev(df)
-        if name.startswith("US "):
-            close /= 10.0
-            prev /= 10.0
-        delta = pct_change(close, prev)
-        with cols[i % 3]:
-            st.metric(name, f"{close:,.3f}", f"{delta:+.2f}% d/d")
-
-    st.markdown("##### 1Y sparklines (rescaled axes)")
-
-    def show_row(names):
-        r = st.columns(3)
-        for i, nm in enumerate(names):
-            df = data.get(nm, pd.DataFrame())
-            if getattr(df, "empty", True):
-                continue
-            plot_df = _to_plot_df(df)
-            if nm.startswith("US "):
-                plot_df = plot_df.copy()
-                plot_df["Close"] = plot_df["Close"] / 10.0
-            ch = _sparkline(nm, plot_df)
-            r[i % 3].altair_chart(ch, use_container_width=True)
-
-    show_row(list(euro_symbols.keys()))
-    show_row(list(fx_symbols.keys()))
-    if show_us and len(us_symbols) > 0:
-        st.markdown("###### U.S. Treasuries (optional)")
-        show_row(list(us_symbols.keys()))
+#----------------------------------------------------------------------------------------------------
 
 
 def render_central_banks():

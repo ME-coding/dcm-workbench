@@ -250,7 +250,7 @@ def render():
             put_price = st.number_input("Put price", value=95.0, step=0.5, format="%.2f", key="cv_put_px")
             put_start = st.number_input("Puttable from (year)", value=2.0, step=0.5, format="%.1f", key="cv_put_from")
 
-        steps = int(st.slider("Tree steps (binomial)", min_value=50, max_value=800, value=200, step=10, key="cv_steps"))
+        steps = int(st.slider("Tree steps (binomial)", min_value=50, max_value=400, value=100, step=10, key="cv_steps"))
         st.caption("Numerical grid: more steps improve accuracy but increase computation time.")
 
     # -------------------
@@ -332,11 +332,6 @@ def render():
     bond_floor = _straight_bond_price_floor(spec)
     conv_val_now, parity = _parity_and_conv_value(spec)
     delta, gamma = _greek_delta_gamma(spec)
-
-    # -------------------
-    # Bottom-Left: Chart — Convertible price vs current stock price S₀
-    # -------------------
-
 
     # -------------------
     # Bottom-Left: Chart — Convertible price vs current stock price S₀
