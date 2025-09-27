@@ -230,26 +230,26 @@ def render():
                 )
         else:
             # Monte Carlo short-rate parameters (no formula caption here)
-            _label_with_help("Initial short rate r₀ (%, annual)", "Starting instantaneous rate at t = 0.")
+            _label_with_help("Initial short rate r₀ (%, annual)", "Starting instantaneous risk-free rate at t = 0.")
             r0 = st.number_input("Initial short rate r₀ (%, annual)", value=3.00, step=0.25, format="%.2f", key=W + "r0", label_visibility="collapsed") / 100.0
 
-            _label_with_help("Mean reversion a", "Speed pulling r(t) back toward θ.")
+            _label_with_help("Mean reversion a", "Speed at which r(t) is pulled back toward the long-run level θ.")
             a = st.number_input("Mean reversion a", value=0.10, step=0.05, format="%.2f", key=W + "a", label_visibility="collapsed")
 
-            _label_with_help("Volatility σ (%, annual)", "Randomness of r(t); higher σ → wider dispersion.")
+            _label_with_help("Volatility σ (%, annual)", "Size of random yearly rate moves; higher σ → wider rate dispersion.")
             vol = st.number_input("Volatility σ (%, annual)", value=1.00, step=0.10, format="%.2f", key=W + "vol", label_visibility="collapsed") / 100.0
 
-            _label_with_help("Long-run level θ (%, annual)", "Level r(t) mean-reverts to in the model.")
+            _label_with_help("Long-run level θ (%, annual)", "Rate it tends to over time (mean-reversion).")
             theta = st.number_input("Long-run level θ (%, annual)", value=2.00, step=0.25, format="%.2f", key=W + "theta", label_visibility="collapsed") / 100.0
 
-            _label_with_help("Time step", "Smaller step → more accurate path integral.")
+            _label_with_help("Time step", "Simulation granularity; smaller steps approximate the integral more accurately.")
             dt = st.selectbox("Time step", ["Daily (~1/252)", "Weekly (~1/52)", "Monthly (~1/12)"], index=0, key=W + "dt", label_visibility="collapsed")
             dt_val = {"Daily (~1/252)": 1/252, "Weekly (~1/52)": 1/52, "Monthly (~1/12)": 1/12}[dt]
 
-            _label_with_help("Number of paths", "More scenarios → less Monte Carlo noise.")
+            _label_with_help("Number of paths", "Monte Carlo scenarios to average over; more paths reduce statistical noise.")
             n_paths = int(st.number_input("Number of paths", value=10000, step=1000, key=W + "npaths", label_visibility="collapsed"))
 
-            _label_with_help("Random seed", "Fix randomness for reproducible results.")
+            _label_with_help("Random seed", "Locks randomness for repeatable results.")
             seed = int(st.number_input("Random seed", value=42, step=1, key=W + "seed", label_visibility="collapsed"))
 
         # Sticky spec
@@ -389,31 +389,33 @@ def render():
             st.metric("Modified duration (yrs)", f"{modD:,.2f}")
             st.metric("Price-to-Par (%)", f"{price_to_par:,.2f}%")
 
-        # ---- Grey headline explanations under the metrics (identical to Vanilla text) ----
-        st.markdown(
-            """
-            <div class="subtle-grey" style="font-size:0.95rem; margin-top:.35rem;">
-              <div style="font-weight:600; margin-bottom:.15rem;">Price</div>
-              <div>The clean price is the present value of coupons and principal discounted at the chosen rate (YTM or discount rate). It excludes accrued interest.</div>
+        # ---- Collapsible "Learn More" with explanations identical to Vanilla ----
+        with st.expander("Learn More"):
+            st.markdown(
+                """
+                <div class="subtle-grey" style="font-size:0.95rem;">
+                <div style="font-weight:600; margin-bottom:.15rem;">Price</div>
+                <div>The clean price is the present value of coupons and principal discounted at the chosen rate (YTM or discount rate). It excludes accrued interest.</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Zero yield</div>
-              <div>The single annualized rate that discounts the redemption amount back to today. It is the term rate applicable to the maturity T.</div>
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Zero yield</div>
+                <div>The single annualized rate that discounts the redemption amount back to today. It is the term rate applicable to the maturity T.</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Macaulay duration (yrs)</div>
-              <div>Time-weighted average maturity of the bond’s cash flows (in years). Interpreted as the investment’s effective “center of mass” in time.</div>
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Macaulay duration (yrs)</div>
+                <div>Time-weighted average maturity of the bond’s cash flows (in years). Interpreted as the investment’s effective “center of mass” in time.</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Modified duration (yrs)</div>
-              <div>Price sensitivity to small, parallel yield changes: approximately <em>%ΔPrice ≈ −ModDur × ΔYield</em> (yield in decimal). Useful for first-order risk.</div>
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Modified duration (yrs)</div>
+                <div>Price sensitivity to small, parallel yield changes: approximately <em>%ΔPrice ≈ −ModDur × ΔYield</em> (yield in decimal). Useful for first-order risk.</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Convexity (yrs²)</div>
-              <div>Second-order curvature of the price–yield relation. Higher convexity means the duration estimate errs less for larger yield moves (price falls less when yields rise and rises more when yields fall).</div>
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Convexity (yrs²)</div>
+                <div>Second-order curvature of the price–yield relation. Higher convexity means the duration estimate errs less for larger yield moves (price falls less when yields rise and rises more when yields fall).</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Price-to-Par (%)</div>
-              <div>Price expressed as a percentage of the face value. &gt;100% = premium bond (coupon &gt; yield), &lt;100% = discount bond (coupon &lt; yield).</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Price-to-Par (%)</div>
+                <div>Price expressed as a percentage of the face value. &gt;100% = premium bond (coupon &gt; yield), &lt;100% = discount bond (coupon &lt; yield).</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
 
     # ---------- (Extra) Monte Carlo paths chart ----------
     if method == "Monte Carlo (Short-Rate)" and mc_paths is not None and t_grid_paths is not None:

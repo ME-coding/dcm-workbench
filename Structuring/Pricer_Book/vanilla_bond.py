@@ -299,7 +299,7 @@ def render():
             unsafe_allow_html=True
         )
 
-        # --- Bottom-Right: KPIs — two columns × three rows, big numbers, rounded to 2 decimals ---
+       # --- Bottom-Right: KPIs — two columns × three rows, big numbers, rounded to 2 decimals ---
     with colBR:
         st.subheader("Key metrics")
 
@@ -330,29 +330,29 @@ def render():
             st.metric("Modified duration (yrs)", f"{modD:,.2f}")
             st.metric("Price-to-Par (%)", f"{price_to_par:,.2f}%")
 
+        # ---- Collapsible "Learn More" just under the KPIs (right column area) ----
+        with st.expander("Learn More"):
+            st.markdown(
+                """
+                <div class="subtle-grey" style="font-size:0.95rem;">
+                <div style="font-weight:600; margin-bottom:.15rem;">Price</div>
+                <div>The clean price is the present value of coupons and principal discounted at the chosen rate (YTM or discount rate). It excludes accrued interest.</div>
 
-        # ---- Grey headline explanations under the metrics (pedagogical) ----
-        st.markdown(
-            """
-            <div class="subtle-grey" style="font-size:0.95rem; margin-top:.35rem;">
-              <div style="font-weight:600; margin-bottom:.15rem;">Price</div>
-              <div>The clean price is the present value of coupons and principal discounted at the chosen rate (YTM or discount rate). It excludes accrued interest.</div>
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Yield (annual, %)</div>
+                <div>The single annualized rate that makes the present value of future cash flows equal to today’s clean price. Think of it as the bond’s IRR if held to maturity and coupons are reinvested at the same rate.</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Yield (annual, %)</div>
-              <div>The single annualized rate that makes the present value of future cash flows equal to today’s clean price. Think of it as the bond’s IRR if held to maturity and coupons are reinvested at the same rate.</div>
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Macaulay duration (yrs)</div>
+                <div>Time-weighted average maturity of the bond’s cash flows (in years). Interpreted as the investment’s effective “center of mass” in time.</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Macaulay duration (yrs)</div>
-              <div>Time-weighted average maturity of the bond’s cash flows (in years). Interpreted as the investment’s effective “center of mass” in time.</div>
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Modified duration (yrs)</div>
+                <div>Price sensitivity to small, parallel yield changes: approximately <em>%ΔPrice ≈ −ModDur × ΔYield</em> (yield in decimal). Useful for first-order risk.</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Modified duration (yrs)</div>
-              <div>Price sensitivity to small, parallel yield changes: approximately <em>%ΔPrice ≈ −ModDur × ΔYield</em> (yield in decimal). Useful for first-order risk.</div>
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Convexity (yrs²)</div>
+                <div>Second-order curvature of the price–yield relation. Higher convexity means the duration estimate errs less for larger yield moves (price falls less when yields rise and rises more when yields fall).</div>
 
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Convexity (yrs²)</div>
-              <div>Second-order curvature of the price–yield relation. Higher convexity means the duration estimate errs less for larger yield moves (price falls less when yields rise and rises more when yields fall).</div>
-
-              <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Price-to-Par (%)</div>
-              <div>Price expressed as a percentage of the face value. &gt;100% = premium bond (coupon &gt; yield), &lt;100% = discount bond (coupon &lt; yield).</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+                <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Price-to-Par (%)</div>
+                <div>Price expressed as a percentage of the face value. &gt;100% = premium bond (coupon &gt; yield), &lt;100% = discount bond (coupon &lt; yield).</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
