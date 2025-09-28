@@ -120,14 +120,22 @@ A **€500 million 10-year fixed-rate bond** (base coupon **2.625%**) whose **20
     # ---- PARAMETERS (left)
     with left:
         st.markdown("### Simulation controls")
-        co2_red = st.slider(
-            "Reduction of the absolute Scope 1 and 2 CO₂ emissions (objective: >33%)",
-            0.0, 100.0, 30.0, 0.5
+
+        # Texte + slider pour Scope 1 & 2
+        st.markdown(
+            "Reduction of the absolute Scope 1 and 2 CO₂ emissions "
+            "(<u><b>objective: >33%</b></u>)",
+            unsafe_allow_html=True
         )
-        waste_red = st.slider(
-            "Reduction of non-recovered production waste (objective: >80%)",
-            0.0, 100.0, 75.0, 0.5
+        co2_red = st.slider("", 0.0, 100.0, 30.0, 0.5)
+
+        # Texte + slider pour waste
+        st.markdown(
+            "Reduction of non-recovered production waste "
+            "(<u><b>objective: >80%</b></u>)",
+            unsafe_allow_html=True
         )
+        waste_red = st.slider("", 0.0, 100.0, 75.0, 0.5)
 
     # Determine KPI misses
     miss_co2   = 0 if co2_red > 33.0 else 1
