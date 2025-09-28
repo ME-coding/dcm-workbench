@@ -1,18 +1,25 @@
 # page2/news.py
 from __future__ import annotations
 
+# =======================================================
+# Standard libs
+# =======================================================
 import io
 import os
 import re
+from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
 
+# =======================================================
+# Third-party libs
+# =======================================================
 import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
 
-# ---------- Optional libs ----------
+# ---------- Optional libs (loaded best-effort) ----------
 try:
     import feedparser  # pip install feedparser
 except Exception:
@@ -30,19 +37,25 @@ except Exception:
 
 
 # =======================================================
-# Helpers & cache
+# Helpers & Cache
 # =======================================================
 
 @st.cache_data(ttl=900)
 def fetch_rss(urls: List[str], limit_per_feed: int = 10) -> pd.DataFrame:
+    """
+    Fetch multiple RSS feeds (if feedparser is available) and return
+    a unified dataframe sorted by published date desc.
+    """
     rows = []
     if not feedparser or not isinstance(urls, list) or len(urls) == 0:
         return pd.DataFrame(columns=["source", "title", "link", "published"])
+
     for u in urls:
         if not isinstance(u, str) or not u.strip():
             continue
         try:
             feed = feedparser.parse(u)
+            # Extract source title if present
             src_title = None
             try:
                 src_title = getattr(feed, "feed", None)
@@ -54,6 +67,7 @@ def fetch_rss(urls: List[str], limit_per_feed: int = 10) -> pd.DataFrame:
                 src_title = None
             src = (src_title or u.split("//")[-1]).strip()
 
+            # Entries
             entries = getattr(feed, "entries", [])[: int(limit_per_feed)]
             for e in entries:
                 title = str(getattr(e, "title", "")).strip()
@@ -67,6 +81,7 @@ def fetch_rss(urls: List[str], limit_per_feed: int = 10) -> pd.DataFrame:
                 rows.append({"source": src, "title": title, "link": link, "published": ts})
         except Exception:
             continue
+
     df = pd.DataFrame(rows)
     if not df.empty:
         df["published"] = pd.to_datetime(df["published"], utc=True, errors="coerce")
@@ -76,6 +91,9 @@ def fetch_rss(urls: List[str], limit_per_feed: int = 10) -> pd.DataFrame:
 
 @st.cache_data(ttl=900)
 def fetch_prices(symbols: Dict[str, str], period: str = "1y", interval: str = "1d") -> Dict[str, pd.DataFrame]:
+    """
+    Fetch historical prices with yfinance; fallback to demo series if unavailable.
+    """
     out: Dict[str, pd.DataFrame] = {}
     if yf is None or not isinstance(symbols, dict) or len(symbols) == 0:
         return demo_prices(symbols)
@@ -95,6 +113,9 @@ def fetch_prices(symbols: Dict[str, str], period: str = "1y", interval: str = "1
 
 
 def demo_series(name: str) -> pd.DataFrame:
+    """
+    Generate a sinusoidal + noise demo timeseries for 'Close' prices.
+    """
     idx = pd.date_range(end=datetime.utcnow().date(), periods=252, freq="B")
     base = 3.0 if any(tag in name for tag in ["US", "DE", "FR", "UK", "IT", "ES"]) else 1.10
     vals = base + 0.3 * np.sin(np.linspace(0, 8, len(idx))) + np.random.normal(0, 0.05, len(idx))
@@ -103,11 +124,17 @@ def demo_series(name: str) -> pd.DataFrame:
 
 
 def demo_prices(symbols: Dict[str, str] | None) -> Dict[str, pd.DataFrame]:
+    """
+    Return demo series for each requested symbol name.
+    """
     symbols = symbols or {}
     return {k: demo_series(k) for k in symbols.keys()}
 
 
 def pct_change(latest: float, prev: float) -> float:
+    """
+    Percentage change helper.
+    """
     if prev == 0:
         return 0.0
     return (latest - prev) / prev * 100.0
@@ -119,6 +146,11 @@ def pct_change(latest: float, prev: float) -> float:
 
 @st.cache_data(ttl=3600)
 def fetch_policy_rates() -> pd.DataFrame:
+    """
+    Fetch latest policy rates (Fed range, ECB MRO/DFR) via FRED CSV endpoints.
+    Also attempts BoE Bank Rate by scraping the BoE page.
+    Displays a styled table in Streamlit and returns a DataFrame of rows.
+    """
     rows: List[Dict[str, str]] = []
 
     def fred_last(series_id: str):
@@ -139,7 +171,7 @@ def fetch_policy_rates() -> pd.DataFrame:
         except Exception:
             return None, None
 
-    # Ton code qui remplit rows
+    # -------- Fed (target range upper/lower) --------
     rows = []
     up, up_date = fred_last("DFEDTARU")
     lo, lo_date = fred_last("DFEDTARL")
@@ -152,6 +184,7 @@ def fetch_policy_rates() -> pd.DataFrame:
             "As of": asof.tz_convert("Europe/Paris").strftime("%Y-%m-%d") if isinstance(asof, pd.Timestamp) else "",
         })
 
+    # -------- ECB (MRO / DFR) --------
     mro, mro_date = fred_last("ECBMRRFR")
     dfr, dfr_date = fred_last("ECBDFR")
     if mro is not None:
@@ -169,18 +202,16 @@ def fetch_policy_rates() -> pd.DataFrame:
             "As of": dfr_date.tz_convert("Europe/Paris").strftime("%Y-%m-%d") if isinstance(dfr_date, pd.Timestamp) else "",
         })
 
-    # Transformation en DataFrame
+    # -------- Streamlit render (bold 'Latest') --------
     df = pd.DataFrame(rows)
 
-    # Application du style : mettre en gras uniquement la colonne "Latest"
-    def highlight_latest(val):
+    def highlight_latest(_):
         return "font-weight: bold"
 
     styled_df = df.style.applymap(highlight_latest, subset=["Latest"])
-
-    # Affichage dans Streamlit (index masqué)
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
+    # -------- BoE (scrape current Bank Rate) --------
     if requests is not None:
         try:
             resp = requests.get("https://www.bankofengland.co.uk/boeapps/database/Bank-Rate.asp", timeout=10)
@@ -197,6 +228,7 @@ def fetch_policy_rates() -> pd.DataFrame:
         except Exception:
             pass
 
+    # Note: return columns use 'AsOf' key as originally implemented
     return pd.DataFrame(rows, columns=["Authority", "Measure", "Latest", "AsOf"])
 
 
@@ -210,6 +242,9 @@ def _mistral_key() -> str:
 
 
 def summarize_with_mistral(text: str, max_bullets: int = 6, temperature: float = 0.2) -> Optional[str]:
+    """
+    Summarize headlines into concise DCM-focused bullets using Mistral chat endpoint.
+    """
     api_key = _mistral_key()
     if not api_key or requests is None or not text.strip():
         return None
@@ -233,11 +268,15 @@ def summarize_with_mistral(text: str, max_bullets: int = 6, temperature: float =
     except Exception:
         return None
 
+
 # =======================================================
 # UI helpers (links & tables)
 # =======================================================
 
 def render_links_note():
+    """
+    Quick curated links to markets / central banks / SSA / sustainable finance.
+    """
     st.markdown("#### Links to financial news")
     col1, col2, col3 = st.columns(3)
 
@@ -289,12 +328,16 @@ def render_links_note():
 
     st.caption("Some sources require subscriptions. Links open in your browser.")
 
+
 def _render_clickable_table(df_view: pd.DataFrame):
+    """
+    Render a compact HTML table with clickable 'Open' links.
+    """
     if df_view.empty:
         st.info("No items to display.")
         return
 
-    # Inject CSS une seule fois
+    # Inject CSS once per session
     if not st.session_state.get("_compact_table_css", False):
         st.markdown(
             """
@@ -336,7 +379,11 @@ def _render_clickable_table(df_view: pd.DataFrame):
     html = df_view.to_html(escape=False, index=False, formatters=fmt, classes="compact-table")
     st.markdown(html, unsafe_allow_html=True)
 
+
 def _sources_editor(default: Dict[str, str], key: str) -> Dict[str, str]:
+    """
+    Textarea editor: one source per line in the form 'Name | URL'.
+    """
     st.caption("Edit sources (one per line: `Name | URL`)")
     default_text = "\n".join([f"{k} | {v}" for k, v in default.items()])
     txt = st.text_area("Sources", value=default_text, key=key, height=140, label_visibility="collapsed")
@@ -349,15 +396,19 @@ def _sources_editor(default: Dict[str, str], key: str) -> Dict[str, str]:
                 out[name] = url
     return out or default
 
+
 # =======================================================
-# Sections
+# Section: News Aggregator (RSS)
 # =======================================================
 
 def render_news_aggregator():
+    """
+    RSS-based news aggregator with keyword filter and optional AI summary.
+    """
     st.markdown("#### News aggregator (RSS)")
     st.caption("Pulls headlines from public RSS sources. Filter by keyword and optionally summarize with AI.")
 
-    # === Version préférée (seconde) ===
+    # ----- Default sources (editable) -----
     sources = {
         "Reuters Business": "http://feeds.reuters.com/reuters/businessNews",
         "Reuters Markets": "http://feeds.reuters.com/reuters/marketsNews",
@@ -367,38 +418,41 @@ def render_news_aggregator():
         "ECB — Press & Speeches": "https://www.ecb.europa.eu/rss/press.html",
     }
 
+    # Controls
     c1, c2 = st.columns([2, 1])
     with c1:
         kw = st.text_input("Keyword filter (e.g., 'ECB', 'syndicate', 'IG issuance', 'swaps')", "")
     with c2:
         limit = st.number_input("Items per feed", min_value=5, max_value=50, value=10, step=5)
 
+    # Editable list
     with st.expander("Show / edit RSS sources", expanded=False):
         sources = _sources_editor(sources, key="rss_sources_editor")
 
+    # Fetch
     urls = list(sources.values())
     df = fetch_rss(urls, limit_per_feed=int(limit)) if urls else pd.DataFrame(columns=["source", "title", "link", "published"])
 
     if not df.empty:
-        # 1) Dédup inter-flux
+        # 1) Cross-feed dedup
         df["link"] = df["link"].astype(str)
         df["title_norm"] = df["title"].astype(str).str.strip().str.lower()
         df = df.drop_duplicates(subset=["link"]).drop_duplicates(subset=["title_norm"]).copy()
 
-        # 2) Filtre mot-clé
+        # 2) Keyword filter
         if kw.strip():
             mask = df["title"].str.contains(kw, case=False, na=False) | df["source"].str.contains(kw, case=False, na=False)
             df = df[mask].copy()
 
-        # 3) Cap GLOBAL à `limit`
+        # 3) Global cap to `limit`
         df = df.sort_values("published", ascending=False).head(int(limit))
 
-        # 4) Rendu
+        # 4) Render
         df["Time"] = df["published"].dt.tz_convert("Europe/Paris").dt.strftime("%Y-%m-%d %H:%M")
         df_view = df[["Time", "source", "title", "link"]].rename(columns={"source": "Source", "title": "Title", "link": "Link"})
         _render_clickable_table(df_view)
 
-        # 5) Résumé IA (version préférée, sans wrapper couleur)
+        # 5) AI summary (Mistral) — top 10 titles
         if _mistral_key():
             sample = "\n".join([f"- {t}" for t in df["title"].head(10).astype(str).tolist()])
             if st.button("Summarize top 10 (AI)"):
@@ -412,23 +466,18 @@ def render_news_aggregator():
     else:
         st.info("No headlines fetched yet. Check your internet connection or adjust sources.")
 
-def _to_plot_df(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or getattr(df, "empty", True):
-        return pd.DataFrame(columns=["Date", "Close"])
-    out = df.copy()
-    if "Close" not in out.columns:
-        if "Adj Close" in out.columns:
-            out = out.rename(columns={"Adj Close": "Close"})
-        else:
-            return pd.DataFrame(columns=["Date", "Close"])
-    out["Date"] = out.index
-    out = out.reset_index(drop=True)
-    return out[["Date", "Close"]]
 
+# =======================================================
+# Plot helpers (sparklines)
+# =======================================================
 
 def _sparkline(name: str, plot_df: pd.DataFrame) -> alt.Chart:
+    """
+    Build a compact Altair line chart with padded y-domain and optional tick step.
+    """
     if plot_df.empty:
         return alt.Chart(pd.DataFrame({"Date": [], "Close": []})).mark_line()
+
     s = pd.to_numeric(plot_df["Close"], errors="coerce").dropna()
     y_min, y_max = float(s.min()), float(s.max())
     span = max(y_max - y_min, 1e-6)
@@ -463,27 +512,37 @@ def _sparkline(name: str, plot_df: pd.DataFrame) -> alt.Chart:
 
 
 def _latest_and_prev(df: pd.DataFrame) -> tuple[float, float]:
+    """
+    Return last and previous close values for delta calculation.
+    """
     if df is None or getattr(df, "empty", True) or "Close" not in df.columns:
         return (np.nan, np.nan)
     last = float(df["Close"].iloc[-1])
     prev = float(df["Close"].iloc[-2]) if len(df) > 1 else last
     return last, prev
 
-# =========================
-# NEW: Macroeconomics Dashboard (fusion)
-# =========================
+
+# =======================================================
+# Macroeconomics Dashboard (Fusion)
+# =======================================================
+
 def render_macroeconomics_dashboard():
+    """
+    Dashboard with:
+    - Policy rates table (Fed/ECB/BoE)
+    - Latest 10Y levels (US/DE/FR/UK) from YF (TNX scaled) with FRED fallback
+    - Monthly OECD/MEI spreads (US−FR, FR−DE) for last 10 years (CSV files)
+    """
     global pd
     st.markdown("#### Macroeconomics Dashboard")
     st.caption("Central banks & macro feeds — Official feeds and latest policy rates for Fed / ECB / BoE. Edit/add your own if needed.")
 
-    # --- Policy rates table: fetch & display inside fetch_policy_rates (no duplicate table) ---
+    # --- Policy rates table: fetch & display inside fetch_policy_rates ---
     _ = fetch_policy_rates()
 
-    # ---------- Latest levels (10Y) — corrected (real data only; English labels; date shown) ----------
+    # ---------- Latest levels (10Y) ----------
     st.markdown("##### Latest levels (10Y)")
 
-    # Clear English labels
     SYMBOLS_YF = {
         "German 10Y Bund Yield (%)":   "DE10Y.BOND",
         "French 10Y OAT Yield (%)":    "FR10Y.BOND",
@@ -491,7 +550,6 @@ def render_macroeconomics_dashboard():
         "US 10Y Treasury Yield (%)":   "^TNX",   # TNX = tenths of a percent
     }
 
-    # FRED fallback (US daily, others monthly OECD/MEI)
     FRED_SERIES = {
         "US 10Y Treasury Yield (%)":   "DGS10",
         "German 10Y Bund Yield (%)":   "IRLTLT01DEM156N",
@@ -541,7 +599,7 @@ def render_macroeconomics_dashboard():
         except Exception:
             return None
 
-    # Fetch real data (Yahoo -> FRED fallback)
+    # Real data fetch (Yahoo -> FRED fallback)
     real_data: dict[str, pd.DataFrame] = {}
     for name, ticker in SYMBOLS_YF.items():
         df = fetch_yf_one(ticker, period="1y", interval="1d")
@@ -556,7 +614,7 @@ def render_macroeconomics_dashboard():
             if df_fred is not None and not df_fred.empty:
                 real_data[name] = df_fred
 
-    # Render KPIs with date (mm/dd/yyyy)
+    # KPI render with date (mm/dd/yyyy)
     cols = st.columns(4)
     for i, name in enumerate(SYMBOLS_YF.keys()):
         df = real_data.get(name)
@@ -568,11 +626,8 @@ def render_macroeconomics_dashboard():
 
             close, prev = _latest_and_prev(df)
 
-            # Daily vs monthly tag (simple gap heuristic)
-            if len(df) >= 2:
-                delta_days = (df["Date"].iloc[-1] - df["Date"].iloc[-2]).days
-            else:
-                delta_days = 1
+            # Daily vs monthly tag (gap heuristic)
+            delta_days = (df["Date"].iloc[-1] - df["Date"].iloc[-2]).days if len(df) >= 2 else 1
             delta_tag = "m/m" if delta_days >= 15 else "d/d"
 
             st.metric(label=name, value=f"{close:,.3f}", delta=f"{pct_change(close, prev):+.2f}% {delta_tag}")
@@ -580,16 +635,15 @@ def render_macroeconomics_dashboard():
             asof = pd.to_datetime(df["Date"].iloc[-1])
             st.caption(f"Data as of {asof.strftime('%m/%d/%Y')}")
 
-# === REPLACED / UPDATED: Spreads chart (US−FR & FR−DE), mensuel, 10 dernières années ===
-    from pathlib import Path
-    import os, re
-    from typing import Optional
+    # ===================================================
+    # Spreads chart (US−FR & FR−DE) — monthly, last 10y
+    # ===================================================
 
-    # --- Résolution robuste du dossier de données ---
+    # ---- Data directory resolution ----
     def _find_dir_up(start: Path, target_dirname: str) -> Path | None:
-        """Remonte depuis 'start' pour trouver un dossier nommé 'target_dirname'."""
+        """Climb up from 'start' to find a directory named 'target_dirname'."""
         cur = start
-        for _ in range(6):  # remonte quelques niveaux
+        for _ in range(6):
             candidate = cur / target_dirname
             if candidate.exists() and candidate.is_dir():
                 return candidate.resolve()
@@ -599,9 +653,8 @@ def render_macroeconomics_dashboard():
         return None
 
     def _get_data_dir() -> Path:
-        # a) via st.secrets si défini
+        # a) st.secrets["DATA_DIR"] if present
         try:
-            import streamlit as st
             if "DATA_DIR" in st.secrets:
                 p = Path(st.secrets["DATA_DIR"]).expanduser().resolve()
                 if p.exists():
@@ -609,23 +662,22 @@ def render_macroeconomics_dashboard():
         except Exception:
             pass
 
-        # b) via variable d'environnement
+        # b) environment variable
         env_p = os.getenv("DATA_DIR")
         if env_p:
             p = Path(env_p).expanduser().resolve()
             if p.exists():
                 return p
 
-        # c) recherche d'un dossier 'xlx' en remontant depuis ce fichier
+        # c) search for 'xlx' upward from this file
         here = Path(__file__).resolve()
         found = _find_dir_up(here.parent, "xlx")
         if found:
             return found
 
-        # d) fallback: CWD/xlx (utile sur certains runners)
+        # d) fallback: CWD/xlx
         return (Path.cwd() / "xlx").resolve()
 
-    # Chemin utilisé (string pour compatibilité os.path.join)
     DATA_DIR = str(_get_data_dir())
 
     def _pick_file(patterns: list[str]) -> Optional[str]:
@@ -637,32 +689,31 @@ def render_macroeconomics_dashboard():
             regex = re.compile(p, re.IGNORECASE)
             candidates = [f for f in files if regex.search(f)]
             if candidates:
-                # prend le plus récent (mtime)
                 candidates.sort(key=lambda fn: os.path.getmtime(os.path.join(DATA_DIR, fn)), reverse=True)
                 return os.path.join(DATA_DIR, candidates[0])
         return None
 
     def _load_monthly_series(path: str) -> pd.DataFrame:
         df = pd.read_csv(path)
-        # normalise colonnes
+        # normalize columns
         df.columns = [c.strip().lower() for c in df.columns]
-        # colonne date
+
+        # date column
         date_col = None
         for c in ["date", "observation_date", "month"]:
             if c in df.columns:
                 date_col = c
                 break
         if not date_col:
-            # fallback: première colonne
             date_col = df.columns[0]
-        # colonne valeur
+
+        # value column
         val_col = None
         for c in ["value", "yield", "yld", "rate", "close", "price"]:
             if c in df.columns:
                 val_col = c
                 break
         if not val_col:
-            # fallback: première colonne numérique != date
             num_cols = [c for c in df.columns if c != date_col]
             for c in num_cols:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -677,22 +728,17 @@ def render_macroeconomics_dashboard():
         out["Value"] = pd.to_numeric(out["Value"], errors="coerce")
         out = out.dropna(subset=["Date", "Value"]).sort_values("Date")
 
-        # ré-échantillonne en mensuel si nécessaire (dernier point du mois)
+        # resample to monthly if needed (last point of month)
         monthly_points = out["Date"].dt.to_period("M").nunique()
         if monthly_points < len(out) * 0.9:
-            out = (
-                out.set_index("Date")
-                   .resample("M")
-                   .last()
-                   .reset_index()
-            )
+            out = out.set_index("Date").resample("M").last().reset_index()
 
-        # date = fin de mois pour alignement propre
+        # end-of-month alignment
         out["Date"] = out["Date"].dt.to_period("M").dt.to_timestamp("M")
         out = out.drop_duplicates(subset=["Date"], keep="last")
         return out
 
-    # Fichiers attendus (US, FR, DE)
+    # Expected files (US, FR, DE)
     us_path = _pick_file([r"^IRLTLT01USM156N.*\.csv$", r"^US-?10Y.*\.csv$", r".*US.*10.*\.csv$"])
     fr_path = _pick_file([r"^IRLTLT01FRM156N.*\.csv$", r"^FR-?10Y.*\.csv$", r".*(FR|FRA).*10.*\.csv$"])
     de_path = _pick_file([r"^IRLTLT01DEM156N.*\.csv$", r"^DE-?10Y.*\.csv$", r".*(DE|GER|DEU).*10.*\.csv$"])
@@ -712,16 +758,16 @@ def render_macroeconomics_dashboard():
 
         df = us.merge(fr, on="Date", how="inner").merge(de, on="Date", how="inner").sort_values("Date")
 
-        # Spreads (renommage demandé)
+        # Spreads (renamed as requested)
         df["spread_pp_FR_vs_US"] = (df["US_10Y"] - df["FR_10Y"]).round(3)  # US − FR
         df["spread_pp_FR_vs_DE"] = (df["FR_10Y"] - df["DE_10Y"]).round(3)  # FR − DE (OAT − Bund)
 
-        # Filtre 10 dernières années
+        # Last 10 years
         today = pd.Timestamp.today().normalize()
         cutoff = (today - pd.DateOffset(years=10)).to_period("M").to_timestamp("M")
         df10 = df[df["Date"] >= cutoff].copy()
 
-        # ----- Graphique spreads (Altair) -----
+        # ----- Altair chart (layered with zero line) -----
         series_labels = {
             "spread_pp_FR_vs_US": "Spread (US 10Y − FR 10Y)",
             "spread_pp_FR_vs_DE": "Spread (FR 10Y − DE 10Y)",
@@ -735,7 +781,6 @@ def render_macroeconomics_dashboard():
         )
         plot_long["Series"] = plot_long["Series"].map(series_labels)
 
-        # Titre via Streamlit (évite qu’il soit masqué par les métriques au-dessus)
         st.markdown("##### US−FR & FR−DE 10Y Long-Term Government Bond Yield Spreads (OECD/MEI, Monthly) — Last 10 Years")
 
         zero_line = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(strokeDash=[6, 4]).encode(y="y:Q")
@@ -749,41 +794,31 @@ def render_macroeconomics_dashboard():
                            "Date:T",
                            title="Date (month end)",
                            axis=alt.Axis(
-                               format="%Y",          # affichage des années
-                               tickCount="year",     # un tick par année
-                               labelAngle=0,         # labels horizontaux
+                               format="%Y",
+                               tickCount="year",
+                               labelAngle=0,
                                ticks=True,
-                               domain=True
+                               domain=True,
                            ),
                        ),
-                       y=alt.Y(
-                           "Spread_pp:Q",
-                           title="Spread (percentage points)",
-                           scale=alt.Scale(zero=False)
-                       ),
+                       y=alt.Y("Spread_pp:Q", title="Spread (percentage points)", scale=alt.Scale(zero=False)),
                        color=alt.Color("Series:N", legend=alt.Legend(title=None, orient="bottom")),
-                       tooltip=[
-                           alt.Tooltip("Date:T"),
-                           alt.Tooltip("Series:N"),
-                           alt.Tooltip("Spread_pp:Q", title="Spread", format=",.3f"),
-                       ],
+                       tooltip=[alt.Tooltip("Date:T"), alt.Tooltip("Series:N"), alt.Tooltip("Spread_pp:Q", title="Spread", format=",.3f")],
                    ),
                 zero_line
             )
-            .properties(height=360)   # <-- plus de title Altair ici
+            .properties(height=360)
             .interactive()
         )
 
         st.altair_chart(chart, use_container_width=True)
 
-        # Source en caption + lien FRED (demandé)
         st.caption(
             "Spreads: US−FR = US 10Y − France 10Y ; FR−DE = France 10Y − Germany 10Y. "
             "Source: OECD/MEI via FRED — US: IRLTLT01USM156N, FR: IRLTLT01FRM156N, DE: IRLTLT01DEM156N. "
             "Voir FRED (US 10Y): https://fred.stlouisfed.org/series/IRLTLT01USM156N#:~:text=Observations"
         )
 
-        # Tableau QA enrichi
         with st.expander("Latest observations (QA)"):
             qa_cols = ["Date", "US_10Y", "FR_10Y", "DE_10Y", "spread_pp_FR_vs_US", "spread_pp_FR_vs_DE"]
             st.dataframe(df10[qa_cols].tail(24).set_index("Date"), use_container_width=True)
@@ -791,10 +826,15 @@ def render_macroeconomics_dashboard():
     except Exception as e:
         st.error(f"US–FR / FR–DE 10Y spreads error: {e}")
 
-#----------------------------------------------------------------------------------------------------
 
+# =======================================================
+# Central Banks (compact section)
+# =======================================================
 
 def render_central_banks():
+    """
+    Compact central banks section (policy rates only; RSS removed per request).
+    """
     st.markdown("#### Central banks & macro feeds")
     st.caption("Official feeds and latest policy rates for Fed / ECB / BoE. Edit/add your own if needed.")
 
@@ -804,31 +844,31 @@ def render_central_banks():
         with c1:
             st.dataframe(rates_df, use_container_width=True, hide_index=True)
         with c2:
-            # Removed success callout per request
+            # Reserved for future widgets (e.g., notes, switches)
             pass
     else:
         st.info("Could not fetch policy rates automatically.")
 
-    # Removed RSS table of central banks news per request
 
 # =======================================================
 # Deal Watch (DCM-hardened)
 # =======================================================
 
-try:
-    import requests  # pip install requests
-except Exception:
-    requests = None
-
 def render_deal_watch():
-    from datetime import datetime  # utilisé pour l'affichage horaire local
+    """
+    Tracker that pulls deal headlines via RSS, filters for DCM-style actions/instruments,
+    attempts issuer extraction, and detects banks from title and article body.
+    """
     from html import unescape as _unescape
 
     st.markdown("#### Deal Tracker")
-    st.caption("Auto-pulls bond issuance press releases via RSS (editable), filters by keywords, and shows latest issuers. \
-Only headlines that combine a DCM instrument AND a primary action verb are kept. Non-DCM 'platform/product launches' are excluded.")
+    st.caption(
+        "Auto-pulls bond issuance press releases via RSS (editable), filters by keywords, and shows latest issuers. "
+        "Only headlines that combine a DCM instrument AND a primary action verb are kept. "
+        "Non-DCM 'platform/product launches' are excluded."
+    )
 
-    # --- 6 deal sources par défaut (éditables) ---
+    # --- Default deal sources (editable) ---
     deal_sources = {
         "GlobeNewswire — Prospectus/Announcement": "https://www.globenewswire.com/RssFeed/subjectcode/63-Prospectus%202fAnnouncement%20Of%20Prospectus/feedTitle/GlobeNewswire%20-%20Prospectus%2C%20Announcement%20Of%20Prospectus",
         "GlobeNewswire — Press Releases": "https://www.globenewswire.com/RssFeed/subjectcode/72-Press%20Releases/feedTitle/GlobeNewswire%20-%20Press%20Releases",
@@ -838,20 +878,13 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
         "London Stock Exchange — RNS (All)": "https://www.londonstockexchange.com/exchange/feeds/rss/news.xml",
     }
 
-    # ======= Filtrage DCM: lookaheads (INSTRUMENT & ACTION) + NEGATIVES =======
-    # Instruments DCM
+    # ======= DCM filter: require INSTRUMENT & ACTION; exclude negatives =======
     _INSTRUMENT = r"(?:green\s+bond|sustainability[-\s]?linked|sustainability|social|transition|sukuk|bond|notes?|debenture|schuldschein|covered|mortgage[-\s]?backed|abs|mbs|emtn|eurobond|private\s+placement|ppn|at1|additional\s+tier\s*1|tier\s*2|subordinated|senior(?!\s+living)|convertible|exchangeable)"
-    # Verbes d'action primaires
     _ACTION = r"(?:announce[sd]?|price[sd]?|launch(?:ed|es|ing)?|issue[sd]?|offer[sd]?|tap(?:ped|s)?|reopen(?:ed|s|ing)?|upsiz(?:e|ed|es|ing)|book(?:build|built|building)|mandate[sd]?|appoints?\s+bookrunners?)"
-    # Taille/tenor (optionnel, mais utile pour réduire le bruit)
-    _SIZE = r"(?:\$\s?\d+|\d+\s?(?:bn|billion|m|million|mm|€|eur|usd|gbp|chf|cad|aud)|\b\d{2,4}\s?(?:year|yr|ans)\b)"
-    # Exclusions communes (non-DCM)
+    _SIZE = r"(?:\$\s?\d+|\d+\s?(?:bn|billion|m|million|mm|€|eur|usd|gbp|chf|cad|aud)|\b\d{2,4}\s?(?:year|yr|ans)\b)"  # optional info
     _NEGATIVE = r"(?:platform|software|app|webinar|token|crypto|nft|ai\s+model|partnership|conference|award|etf|equity|stock|ipo|dividend|earnings|results|buyback|share\s+repurchase|product\s+launch|clinical\s+trial|vaccine|gaming|e-?commerce)"
 
-    # Filtre principal : doit contenir (instrument & action), NE doit PAS contenir negatives
-    DCM_PATTERN = re.compile(
-        rf"(?is)^(?=.*\b{_INSTRUMENT}\b)(?=.*\b{_ACTION}\b)(?!.*\b{_NEGATIVE}\b).*"
-    )
+    DCM_PATTERN = re.compile(rf"(?is)^(?=.*\b{_INSTRUMENT}\b)(?=.*\b{_ACTION}\b)(?!.*\b{_NEGATIVE}\b).*")
 
     def _is_dcm_headline(title: str) -> bool:
         if not isinstance(title, str) or not title.strip():
@@ -861,12 +894,12 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
             return False
         return True
 
+    # Fetch
     limit = st.number_input("Items per feed", min_value=5, max_value=50, value=15, step=5)
-
     urls = list(deal_sources.values())
     df = fetch_rss(urls, limit_per_feed=int(limit)) if urls else pd.DataFrame(columns=["source", "title", "link", "published"])
 
-    # ---------- Banques : dictionnaire de synonymes -> libellé canonique ----------
+    # ---------- Bank synonyms ----------
     BANK_SYNONYMS = {
         "J.P. Morgan": ["J.P. Morgan", "JP Morgan", "JPMorgan"],
         "Morgan Stanley": ["Morgan Stanley"],
@@ -896,56 +929,29 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
         "UniCredit": ["UniCredit"],
         "Santander": ["Santander", "Banco Santander"],
         "BBVA": ["BBVA"],
-
-        # ===== Ajouts (deal Great Elm) =====
-        "Lucid Capital Markets": [
-            "Lucid Capital Markets",
-            "Lucid Capital Markets LLC",
-            "Lucid Capital Markets, LLC"
-        ],
-        "Piper Sandler": [
-            "Piper Sandler",
-            "Piper Sandler & Co.",
-            "Piper Sandler & Co",
-            "Piper Sandler and Co."
-        ],
-        "Clear Street": [
-            "Clear Street",
-            "Clear Street LLC",
-            "Clear Street, LLC"
-        ],
-        "InspereX": [
-            "InspereX",
-            "InspereX LLC",
-            "Insperex",          # tolère la casse/orthographe sans majuscule interne
-            "Insperex LLC"
-        ],
-        "Janney Montgomery Scott": [
-            "Janney Montgomery Scott",
-            "Janney Montgomery Scott LLC",
-            "Janney"
-        ],
+        # Additions (Great Elm example)
+        "Lucid Capital Markets": ["Lucid Capital Markets", "Lucid Capital Markets LLC", "Lucid Capital Markets, LLC"],
+        "Piper Sandler": ["Piper Sandler", "Piper Sandler & Co.", "Piper Sandler & Co", "Piper Sandler and Co."],
+        "Clear Street": ["Clear Street", "Clear Street LLC", "Clear Street, LLC"],
+        "InspereX": ["InspereX", "InspereX LLC", "Insperex", "Insperex LLC"],
+        "Janney Montgomery Scott": ["Janney Montgomery Scott", "Janney Montgomery Scott LLC", "Janney"],
     }
 
-    # mapping "synonyme -> canonique"
     ALT_TO_CANON = {}
     for canon, alts in BANK_SYNONYMS.items():
         for a in alts:
             ALT_TO_CANON[a.lower()] = canon
 
-    # Regex robuste: mots entiers + espaces variables, évite "ing" dans "pricing"
     def _alts_to_regex_parts(alts: List[str]) -> List[str]:
         parts = []
         for a in alts:
             esc = re.escape(a)
-            esc = esc.replace(r"\ ", r"\s+")  # tolère espaces multiples
+            esc = esc.replace(r"\ ", r"\s+")
             parts.append(esc)
         return parts
 
     BANK_PATTERN = re.compile(
-        r"(?<![A-Za-z])(?:%s)(?![A-Za-z])" % "|".join(
-            _alts_to_regex_parts([k for sub in BANK_SYNONYMS.values() for k in sub])
-        ),
+        r"(?<![A-Za-z])(?:%s)(?![A-Za-z])" % "|".join(_alts_to_regex_parts([k for sub in BANK_SYNONYMS.values() for k in sub])),
         re.IGNORECASE,
     )
 
@@ -955,15 +961,13 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
             canon = ALT_TO_CANON.get(m.group(0).lower())
             if canon:
                 hits.append(canon)
-        # unique en conservant l'ordre d'apparition
-        return list(dict.fromkeys(hits))
+        return list(dict.fromkeys(hits))  # unique & order-preserving
 
-    # Récupération du HTML de l'article et conversion en texte brut
+    # Cache for fetched article HTML→plaintext
     if "deal_article_cache" not in st.session_state:
         st.session_state.deal_article_cache = {}
 
     def _fetch_article_plaintext(url: str) -> str:
-        # cache simple
         cache = st.session_state.deal_article_cache
         if url in cache:
             return cache[url]
@@ -973,7 +977,6 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
                 r = requests.get(url, timeout=8, headers=hdr)
                 r.raise_for_status()
                 html = r.text
-                # retire scripts/styles puis tags
                 html = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
                 html = re.sub(r"(?is)<style.*?>.*?</style>", " ", html)
                 text = _unescape(re.sub(r"(?s)<[^>]+>", " ", html))
@@ -985,7 +988,6 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
         cache[url] = text
         return text
 
-    # Extraction d'émetteur : seulement si le titre passe le filtre DCM
     _VERBS = r"(?:announces?|prices?|launches?|issues?|offers?|files|to\s+issue|to\s+offer|mandates?|appoints?)"
     ISSUER_VERB_RE = re.compile(rf"^(.*?)(?:\s+){_VERBS}\b", re.IGNORECASE)
 
@@ -993,23 +995,18 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
         if not _is_dcm_headline(title):
             return None
         t = re.sub(r"\s+", " ", title or "").strip()
-        # supprime les tickers entre parenthèses
         t = re.sub(r"\((?:NASDAQ|NYSE|EPA|LSE|TSX|SIX|FWB|XETRA|HKEX|ASX|BME)[^)]*\)", "", t, flags=re.IGNORECASE)
-        # coupe les slogans/tags après ":" "—" "-"
         t = t.split(" | ")[0]
-        # pattern principal
         m = ISSUER_VERB_RE.search(t)
         cand = m.group(1).strip(" -—:;,.\u2013\u2014") if m else None
         if not cand:
-            # fallback: avant les deux-points / tirets
             cand = t.split(":")[0].split("—")[0].split("-")[0].strip()
-        # heuristique: ignorer si trop générique
         if cand and 1 <= len(cand.split()) <= 8 and not cand.lower().startswith(("press release", "company", "the ")):
             return cand
         return None
 
+    # ---------- Main flow ----------
     if not df.empty:
-        # Filtre DCM (au lieu de regex large initiale)
         mask = df["title"].apply(_is_dcm_headline)
         df = df[mask].copy()
 
@@ -1017,16 +1014,15 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
             st.info("No DCM-style headlines detected (try adjusting sources or broaden the filter).")
             return
 
-        # Affichages
         df["Time"] = df["published"].dt.tz_convert("Europe/Paris").dt.strftime("%Y-%m-%d %H:%M")
         df["Issuer"] = df["title"].apply(_extract_issuer)
 
-        # 1) banques depuis le titre
+        # Banks from title
         df["Banks_title"] = df["title"].apply(_extract_banks_from_text)
 
-        # 2) banques depuis l'article (limite de requêtes pour rester léger)
+        # Banks from page (limited fetch count)
         banks_from_page = []
-        max_fetch = 12  # on limite le nombre de pages à récupérer
+        max_fetch = 12
         fetched = 0
         for _, row in df.sort_values("published", ascending=False).iterrows():
             if fetched >= max_fetch:
@@ -1035,27 +1031,26 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
             text = _fetch_article_plaintext(row.get("link", ""))
             banks_from_page.append(_extract_banks_from_text(text))
             fetched += 1
-        # réaligne sur l'index courant
+
         df_sorted = df.sort_values("published", ascending=False).copy()
         df_sorted["Banks_page"] = banks_from_page
         df = df_sorted.sort_index()
 
-        # Fusionne banques titre + page
+        # Merge banks (title + page)
         def _merge_banks(row) -> list[str]:
             seen = {}
             for b in (row.get("Banks_title", []) or []) + (row.get("Banks_page", []) or []):
                 if b:
                     seen[b] = True
-            # tri alpha pour stabilité
             return sorted(seen.keys(), key=lambda x: x.lower())
 
         df["Banks"] = df.apply(_merge_banks, axis=1)
 
-        # Vue table cliquable (conserve l'existant)
+        # Clickable table
         view = df[["Time", "source", "title", "link"]].rename(columns={"source": "Source", "title": "Title", "link": "Link"})
         _render_clickable_table(view)
 
-        # ---------- Panneau des derniers émetteurs + banques détectées ----------
+        # Latest issuers summary
         issuers_lines = []
         for _, row in df.sort_values("published", ascending=False).iterrows():
             issuer = row.get("Issuer")
@@ -1065,7 +1060,7 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
                     issuers_lines.append(f"{issuer} ({', '.join(banks[:-1]) + ' and ' + banks[-1] if len(banks) > 1 else banks[0]})")
                 else:
                     issuers_lines.append(issuer)
-        issuers_lines = list(dict.fromkeys(issuers_lines))  # unique, ordre conservé
+        issuers_lines = list(dict.fromkeys(issuers_lines))  # unique
 
         if issuers_lines:
             st.markdown("**Latest issuers detected**")
@@ -1077,10 +1072,15 @@ Only headlines that combine a DCM instrument AND a primary action verb are kept.
 
 
 # =======================================================
-# Main render() with hard guards (prevents safe_tab warnings)
+# Main render() — Tabbed layout with guards
 # =======================================================
 
 def render():
+    """
+    Page entrypoint. Renders:
+      - Links section
+      - Tabs: News Aggregator / Macroeconomics Dashboard / Deal Tracker
+    """
     try:
         st.subheader("Intelligence Desk — Latest News and Insights")
         st.caption("Curated links, aggregated headlines, market rates, policy rates, and primary market updates. Internet optional; demo mode kicks in if data is unavailable.")
@@ -1093,7 +1093,7 @@ def render():
 
         st.markdown("---")
 
-        # Updated tabs
+        # Tabs
         tabs = st.tabs(["📰 News Aggregator", "🌐 Macroeconomics Dashboard", "📌 Deal Tracker"])
 
         with tabs[0]:

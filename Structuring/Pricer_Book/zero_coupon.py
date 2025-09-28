@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+# ============================================================
+# Imports
+# ============================================================
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Tuple, Optional
@@ -13,21 +16,21 @@ import altair as alt
 import streamlit as st
 
 
-# =========================
-# Model & utilities
-# =========================
+# ============================================================
+# Model & Utilities
+# ============================================================
 @dataclass
 class ZCSpec:
     face: float = 100.0
     years_to_maturity: float = 5.0
     compounding: str = "Continuous"  # "Continuous" or "Annual"
-    # For Monte Carlo:
-    r0: float = 0.03           # initial short rate (annual, in decimals)
-    a: float = 0.10            # mean reversion speed
-    vol: float = 0.01          # short-rate volatility
-    theta: float = 0.02        # long-run level (constant drift term)
-    dt: float = 1/252          # time step in years (e.g., daily ~ 1/252)
-    n_paths: int = 5_000      # number of Monte Carlo paths
+    # Monte Carlo parameters:
+    r0: float = 0.03      # initial short rate (annual, in decimals)
+    a: float = 0.10       # mean reversion speed
+    vol: float = 0.01     # short-rate volatility
+    theta: float = 0.02   # long-run level (constant drift term)
+    dt: float = 1 / 252   # time step in years (e.g., daily ~ 1/252)
+    n_paths: int = 5_000  # number of Monte Carlo paths
     seed: Optional[int] = 32
 
 
@@ -55,7 +58,11 @@ def _interp_zero_rate_fn(tenors: np.ndarray, rates: np.ndarray) -> Callable[[np.
     return r_of_t
 
 
-def _continuous_discount_from_curve(r_of_t: Callable[[np.ndarray], np.ndarray], T: float, n_steps: int = 1000) -> float:
+def _continuous_discount_from_curve(
+    r_of_t: Callable[[np.ndarray], np.ndarray],
+    T: float,
+    n_steps: int = 1000
+) -> float:
     """Compute exp(-∫_0^T r(u) du) via trapezoidal rule."""
     grid = np.linspace(0.0, T, n_steps + 1)
     r_vals = r_of_t(grid)
@@ -63,7 +70,12 @@ def _continuous_discount_from_curve(r_of_t: Callable[[np.ndarray], np.ndarray], 
     return float(np.exp(-integral))
 
 
-def analytic_price_zero(spec: ZCSpec, r_of_t: Callable[[np.ndarray], np.ndarray], T: float, compounding: str = "Continuous") -> Tuple[float, float]:
+def analytic_price_zero(
+    spec: ZCSpec,
+    r_of_t: Callable[[np.ndarray], np.ndarray],
+    T: float,
+    compounding: str = "Continuous"
+) -> Tuple[float, float]:
     """
     Price a zero-coupon analytically from a spot curve r(t).
     Returns (price, yield_display) where yield_display uses the chosen compounding for display.
@@ -81,17 +93,19 @@ def analytic_price_zero(spec: ZCSpec, r_of_t: Callable[[np.ndarray], np.ndarray]
 
 # ---------- Durations/Convexity for ZC (pedagogical definitions) ----------
 def macaulay_duration_zc(T: float) -> float:
-    # For a pure zero-coupon, all PV mass is at T => Macaulay duration = T (years).
+    """For a pure zero-coupon, Macaulay duration = T (years)."""
     return float(T)
 
+
 def modified_duration_zc(T: float, y: float, compounding: str) -> float:
-    # Under continuous compounding, ModDur = T. Under annual comp., ModDur = T / (1 + y).
+    """Continuous: ModDur = T. Annual: ModDur = T / (1 + y)."""
     if compounding == "Annual":
         return float(T / max(1e-12, (1.0 + y)))
     return float(T)
 
+
 def convexity_zc(T: float, y: float, compounding: str) -> float:
-    # For a zero-coupon: continuous comp → T^2 ; annual (discrete) ≈ T*(T+1)/(1+y)^2.
+    """Continuous: T^2 ; Annual (discrete) ≈ T*(T+1)/(1+y)^2."""
     if compounding == "Annual":
         return float(T * (T + 1.0) / max(1e-12, (1.0 + y) ** 2))
     return float(T ** 2)
@@ -101,7 +115,7 @@ def convexity_zc(T: float, y: float, compounding: str) -> float:
 def simulate_short_rate_paths(spec: ZCSpec, T: float) -> Tuple[np.ndarray, np.ndarray]:
     """
     Simulate r_t via: dr_t = a*(theta - r_t) dt + vol dW_t  (Vasicek/Hull-White with constant theta).
-    Returns (time_grid, paths) with shape paths = (n_paths, n_steps+1).
+    Returns (time_grid, paths) with paths.shape = (n_paths, n_steps+1).
     """
     if spec.seed is not None:
         np.random.seed(spec.seed)
@@ -128,7 +142,8 @@ def simulate_short_rate_paths(spec: ZCSpec, T: float) -> Tuple[np.ndarray, np.nd
 
 def mc_price_zero(spec: ZCSpec, T: float) -> Tuple[float, float, np.ndarray, np.ndarray]:
     """
-    Monte Carlo estimator of a zero-coupon price: average the discounted payoff across simulated paths.
+    Monte Carlo estimator of a zero-coupon price:
+    average the discounted payoff across simulated paths.
     Returns (price, equivalent_cont_yield, t_grid, r_paths_sampled_for_plot).
     """
     t_grid, paths = simulate_short_rate_paths(spec, T)
@@ -145,13 +160,13 @@ def mc_price_zero(spec: ZCSpec, T: float) -> Tuple[float, float, np.ndarray, np.
     return float(price), float(y_cont), t_grid, paths[idx, :]
 
 
-# =========================
-# UI entry point
-# =========================
+# ============================================================
+# UI Entry Point
+# ============================================================
 def render():
     st.markdown("## Zero-Coupon Bond")
 
-    # Global CSS: justify narrative + center st.metric values
+    # --- Global CSS: justify narrative + center st.metric values
     st.markdown(
         """
         <style>
@@ -173,14 +188,14 @@ def render():
         unsafe_allow_html=True
     )
 
-    # 2×2 layout (top parameters / overview; bottom charts / metrics)
+    # --- 2×2 layout (top parameters / overview; bottom charts / metrics)
     colTL, colTR = st.columns([1.05, 1.0])
     colBL, colBR = st.columns([1.2, 0.8])
 
-    # Namespace for unique widget keys on this sub-page
+    # Unique widget key namespace for this sub-page
     W = "zc_"
 
-    # Small helper for grey inline explanations next to titles
+    # Small helper: grey inline explanations next to titles
     def _label_with_help(title: str, help_text: str):
         st.markdown(
             f'<div style="margin-bottom:4px;"><span style="font-weight:600;">{title}</span> '
@@ -188,7 +203,9 @@ def render():
             unsafe_allow_html=True
         )
 
-    # ---------- Top-Left: Parameters ----------
+    # ------------------------------
+    # Top-Left: Parameters
+    # ------------------------------
     with colTL:
         st.subheader("Parameters")
 
@@ -202,17 +219,28 @@ def render():
         # Display yield as — concise helper
         _label_with_help(
             "Display yield as",
-            "Continuous = compounding at every instant; Annual = once per year. Only the quote changes."
+            "Continuous = compounding at every instant; Annual = once per year."
         )
-        compounding = st.selectbox("Display yield as", ["Continuous", "Annual"], index=0, key=W + "comp", label_visibility="collapsed")
+        compounding = st.selectbox(
+            "Display yield as",
+            ["Continuous", "Annual"],
+            index=0,
+            key=W + "comp",
+            label_visibility="collapsed"
+        )
 
         face = st.number_input("Face value", value=100.0, step=1.0, format="%.2f", key=W + "face")
         years = float(st.slider("Maturity (years)", min_value=0, max_value=50, value=5, step=1, key=W + "mat"))
 
         if method == "Analytical (Spot Curve)":
-            curve_mode = st.selectbox("Spot curve mode", ["Flat rate", "Custom zero curve (table)"], index=0, key=W + "curve_mode")
+            curve_mode = st.selectbox(
+                "Spot curve mode", ["Flat rate", "Custom zero curve (table)"],
+                index=0, key=W + "curve_mode"
+            )
             if curve_mode == "Flat rate":
-                flat_z = st.number_input("Flat zero rate (annual, %)", value=3.00, step=0.25, format="%.2f", key=W + "flat_z") / 100.0
+                flat_z = st.number_input(
+                    "Flat zero rate (annual, %)", value=3.00, step=0.25, format="%.2f", key=W + "flat_z"
+                ) / 100.0
                 r_of_t = _flat_zero_rate_fn(flat_z)
                 curve_df = None
             else:
@@ -221,7 +249,10 @@ def render():
                     "TenorYears": [1, 2, 3, 5, 7, 10],
                     "ZeroRatePct": [2.0, 2.3, 2.6, 3.0, 3.1, 3.2],
                 })
-                curve_df = st.data_editor(default_curve, use_container_width=True, num_rows="dynamic", key=W + "curve_tbl")
+                curve_df = st.data_editor(
+                    default_curve, use_container_width=True,
+                    num_rows="dynamic", key=W + "curve_tbl"
+                )
                 if curve_df is None or curve_df.empty:
                     curve_df = default_curve
                 r_of_t = _interp_zero_rate_fn(
@@ -231,26 +262,47 @@ def render():
         else:
             # Monte Carlo short-rate parameters (no formula caption here)
             _label_with_help("Initial short rate r₀ (%, annual)", "Starting instantaneous risk-free rate at t = 0.")
-            r0 = st.number_input("Initial short rate r₀ (%, annual)", value=3.00, step=0.25, format="%.2f", key=W + "r0", label_visibility="collapsed") / 100.0
+            r0 = st.number_input(
+                "Initial short rate r₀ (%, annual)", value=3.00, step=0.25, format="%.2f",
+                key=W + "r0", label_visibility="collapsed"
+            ) / 100.0
 
             _label_with_help("Mean reversion a", "Speed at which r(t) is pulled back toward the long-run level θ.")
-            a = st.number_input("Mean reversion a", value=0.10, step=0.05, format="%.2f", key=W + "a", label_visibility="collapsed")
+            a = st.number_input(
+                "Mean reversion a", value=0.10, step=0.05, format="%.2f",
+                key=W + "a", label_visibility="collapsed"
+            )
 
             _label_with_help("Volatility σ (%, annual)", "Size of random yearly rate moves; higher σ → wider rate dispersion.")
-            vol = st.number_input("Volatility σ (%, annual)", value=1.00, step=0.10, format="%.2f", key=W + "vol", label_visibility="collapsed") / 100.0
+            vol = st.number_input(
+                "Volatility σ (%, annual)", value=1.00, step=0.10, format="%.2f",
+                key=W + "vol", label_visibility="collapsed"
+            ) / 100.0
 
             _label_with_help("Long-run level θ (%, annual)", "Rate it tends to over time (mean-reversion).")
-            theta = st.number_input("Long-run level θ (%, annual)", value=2.00, step=0.25, format="%.2f", key=W + "theta", label_visibility="collapsed") / 100.0
+            theta = st.number_input(
+                "Long-run level θ (%, annual)", value=2.00, step=0.25, format="%.2f",
+                key=W + "theta", label_visibility="collapsed"
+            ) / 100.0
 
             _label_with_help("Time step", "Simulation granularity; smaller steps approximate the integral more accurately.")
-            dt = st.selectbox("Time step", ["Daily (~1/252)", "Weekly (~1/52)", "Monthly (~1/12)"], index=0, key=W + "dt", label_visibility="collapsed")
+            dt = st.selectbox(
+                "Time step", ["Daily (~1/252)", "Weekly (~1/52)", "Monthly (~1/12)"],
+                index=0, key=W + "dt", label_visibility="collapsed"
+            )
             dt_val = {"Daily (~1/252)": 1/252, "Weekly (~1/52)": 1/52, "Monthly (~1/12)": 1/12}[dt]
 
             _label_with_help("Number of paths", "Monte Carlo scenarios to average over; more paths reduce statistical noise.")
-            n_paths = int(st.number_input("Number of paths", value=5000, step=1000, key=W + "npaths", label_visibility="collapsed"))
+            n_paths = int(st.number_input(
+                "Number of paths", value=5000, step=1000,
+                key=W + "npaths", label_visibility="collapsed"
+            ))
 
             _label_with_help("Random seed", "Locks randomness for repeatable results.")
-            seed = int(st.number_input("Random seed", value=42, step=1, key=W + "seed", label_visibility="collapsed"))
+            seed = int(st.number_input(
+                "Random seed", value=42, step=1,
+                key=W + "seed", label_visibility="collapsed"
+            ))
 
         # Sticky spec
         if method == "Monte Carlo (Short-Rate)":
@@ -261,20 +313,23 @@ def render():
         else:
             spec = ZCSpec(face=face, years_to_maturity=years, compounding=compounding)
 
-    # ---------- Top-Right: Method overview ----------
+    # ------------------------------
+    # Top-Right: Method overview
+    # ------------------------------
     with colTR:
         st.subheader("Method overview")
 
         st.markdown(
-            "- **Analytical (Spot Curve):** We treat the bond’s single payoff at maturity as being discounted by the market **term structure of zero rates**. "
-            "If the zero curve is *flat* at level *z*, the price is `Face × exp(−z × T)` under continuous compounding. "
-            "With a **custom curve**, we integrate the instantaneous spot rate over time (area under the curve) and exponentiate the negative of that integral. "
+            "- **Analytical (Spot Curve):** We treat the bond’s single payoff at maturity as being discounted by the market "
+            "**term structure of zero rates**. If the zero curve is *flat* at level *z*, the price is "
+            "`Face × exp(−z × T)` under continuous compounding. With a **custom curve**, we integrate the instantaneous "
+            "spot rate over time (area under the curve) and exponentiate the negative of that integral. "
             "This is the cleanest way to value a pure discount bond in a deterministic-rate world."
         )
         st.markdown(
-            "- **Monte Carlo (Short-Rate):** We simulate many future paths for the **instantaneous short rate** and average the discounted payoff. "
-            "We use a simple **mean-reverting** process: the rate tends to drift back toward a long-run level θ at speed a, while random shocks with volatility σ push it around "
-            "(often written compactly as *dr = a(θ − r)dt + σ dW*). This captures rate uncertainty and lets you stress key drivers like volatility, mean reversion and horizon."
+            "- **Monte Carlo (Short-Rate):** We simulate many future paths for the **instantaneous short rate** and average the "
+            "discounted payoff. We use a simple **mean-reverting** process: the rate tends to drift back toward a long-run level θ "
+            "at speed a, while random shocks with volatility σ push it around (often written as *dr = a(θ − r)dt + σ dW*)."
         )
 
         # Example PDF download
@@ -292,10 +347,14 @@ def render():
         else:
             st.info(f"Place the example PDF at **{pdf_path}** (filename must match exactly).")
 
-    # ---------- Compute pricing ----------
+    # ============================================================
+    # Compute pricing
+    # ============================================================
     if method == "Analytical (Spot Curve)":
-        price, y_disp = analytic_price_zero(spec, r_of_t, spec.years_to_maturity, compounding=spec.compounding)
-        # For charts below, create a one-bar CF at T and an “effective yield” line (like Vanilla)
+        price, y_disp = analytic_price_zero(
+            spec, r_of_t, spec.years_to_maturity, compounding=spec.compounding
+        )
+        # For charts below, create a one-bar CF at T and an “effective yield” line
         t = np.array([spec.years_to_maturity], dtype=float)
         cf = np.array([spec.face], dtype=float)
         t_line = np.linspace(0.5, max(0.5, spec.years_to_maturity), 40)
@@ -303,13 +362,12 @@ def render():
         y_label = "Yield (%)"
         mc_paths = None
         t_grid_paths = None
-
     else:
         # Monte Carlo price (yield displayed in chosen convention)
         price_mc, y_cont, t_grid_paths, mc_paths = mc_price_zero(spec, spec.years_to_maturity)
         price = price_mc
         y_disp = (np.exp(y_cont) - 1.0) if spec.compounding == "Annual" else y_cont
-        # Top chart data
+        # Chart data
         t = np.array([spec.years_to_maturity], dtype=float)
         cf = np.array([spec.face], dtype=float)
         t_line = np.linspace(0.5, max(0.5, spec.years_to_maturity), 40)
@@ -321,7 +379,9 @@ def render():
     modD = modified_duration_zc(spec.years_to_maturity, y_disp, spec.compounding)
     convx = convexity_zc(spec.years_to_maturity, y_disp, spec.compounding)
 
-    # ---------- Bottom-Left: Dual-axis chart (final cash flow bar + effective yield line) ----------
+    # ------------------------------
+    # Bottom-Left: Chart (bar + line)
+    # ------------------------------
     with colBL:
         st.subheader("Charts: Payout at Maturity & Effective Yield vs. Horizon")
 
@@ -348,7 +408,12 @@ def render():
               )
         )
 
-        dual_axis = alt.layer(bars, line).resolve_scale(y='independent').properties(height=380).interactive(bind_y=False)
+        dual_axis = (
+            alt.layer(bars, line)
+               .resolve_scale(y="independent")
+               .properties(height=380)
+               .interactive(bind_y=False)
+        )
         st.altair_chart(dual_axis, use_container_width=True)
 
         # Explanation block
@@ -370,7 +435,9 @@ def render():
             unsafe_allow_html=True
         )
 
-    # ---------- Bottom-Right: Key metrics ----------
+    # ------------------------------
+    # Bottom-Right: Key metrics
+    # ------------------------------
     with colBR:
         st.subheader("Key metrics")
 
@@ -389,7 +456,7 @@ def render():
             st.metric("Modified duration (yrs)", f"{modD:,.2f}")
             st.metric("Price-to-Par (%)", f"{price_to_par:,.2f}%")
 
-        # ---- Collapsible "Learn More" with explanations identical to Vanilla ----
+        # Collapsible "Learn More"
         with st.expander("Learn More"):
             st.markdown(
                 """
@@ -416,16 +483,18 @@ def render():
                 unsafe_allow_html=True
             )
 
-
-    # ---------- (Extra) Monte Carlo paths chart ----------
+    # ------------------------------
+    # Extra: Monte Carlo paths chart
+    # ------------------------------
     if method == "Monte Carlo (Short-Rate)" and mc_paths is not None and t_grid_paths is not None:
         st.markdown("---")
         st.subheader("Monte Carlo: Sampled short-rate paths")
 
-        # Build long DataFrame for Altair
+        # Long DataFrame for Altair
         df_paths = pd.DataFrame(mc_paths)
         df_paths["path_id"] = np.arange(df_paths.shape[0])
         df_long = df_paths.melt(id_vars=["path_id"], var_name="k", value_name="rate")
+
         # Map k → time using t_grid_paths
         df_long["Year"] = df_long["k"].map(dict(enumerate(t_grid_paths)))
         df_long["RatePct"] = df_long["rate"] * 100.0
@@ -439,8 +508,7 @@ def render():
                   color=alt.Color("path_id:N", legend=None),
                   tooltip=[alt.Tooltip("Year:Q"), alt.Tooltip("RatePct:Q", format=",.2f")]
               )
-              .properties(height=460)   # taller, fixed (non-interactive)
-              
+              .properties(height=500)  # taller, fixed (non-interactive)
         )
         st.altair_chart(chart, use_container_width=True)
 
