@@ -1,7 +1,7 @@
 import streamlit as st
 import importlib
 from pathlib import Path
-import base64  # <-- pour la bannière en background
+import base64
 
 # ---------- Page config ----------
 st.set_page_config(
@@ -27,7 +27,7 @@ st.markdown(
       --brand:#0b63c5;
       --brand2:#1c2e6e;
       --surface:rgba(255,255,255,.04);
-      --border:rgba(255,255,255,.18); /* plus marqué */
+      --border:rgba(255,255,255,.18);
       --text-muted:rgba(255,255,255,.72);
     }
 
@@ -37,7 +37,7 @@ st.markdown(
       width:100%;
       height:220px;
       border-radius:18px;
-      margin: .5rem 0 1.25rem 0;
+      margin:.5rem 0 1.25rem 0;
       background-size:cover;
       background-position:center;
       position:relative;
@@ -55,49 +55,8 @@ st.markdown(
     .justify{ text-align:justify; text-justify:inter-word; }
     .overview-text{ font-size:1.05rem; line-height:1.6; }
 
-    .card h4{ margin:0 0 .5rem 0; }
-    .muted{ color:var(--text-muted); font-size:.92rem; }
-
+    .card{ border:2px solid var(--border); border-radius:16px; padding:16px; background:var(--surface); }
     .section-head{ font-weight:700; font-size:1.25rem; margin-bottom:.5rem; }
-
-    .pillbox div[data-testid="stButton"] > button[kind="secondary"]{
-      width:100%;
-      text-align:left;
-      border-radius:999px !important;
-      border:1.5px solid var(--border) !important;
-      background:rgba(11,99,197,.08) !important;
-      color:#cfe4ff !important;
-      box-shadow:none !important;
-      padding:10px 16px !important;
-      margin:.25rem 0;
-      transition:transform .08s ease, background .12s ease, border-color .12s ease;
-      font-weight:600;
-    }
-    .pillbox div[data-testid="stButton"] > button[kind="secondary"]::before{
-      content:"›";
-      display:inline-block;
-      margin-right:6px;
-      font-weight:700;
-      color:#9ec6ff;
-    }
-    .pillbox div[data-testid="stButton"] > button[kind="secondary"]:hover{
-      transform:translateY(-2px);
-      text-decoration:none !Important;
-      background:rgba(11,99,197,.14) !important;
-      border-color:rgba(11,99,197,.40) !important;
-    }
-    hr {
-      border: none;
-      border-top: 3px solid #444; /* trait bien visible et plein */
-      margin: 1.5rem 0;
-    }
-
-    /* Barre verticale entre les deux colonnes */
-    .vertical-separator {
-        border-left: 2px solid rgba(255,255,255,.18);
-        height: 100%;
-        margin: 0 20px;
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -111,9 +70,11 @@ if "nav_target" not in st.session_state:
 
 _options = ["Home Page", "Structuring Desk", "Intelligence Desk"]
 _default_idx = _options.index(st.session_state["nav_target"])
-_radio_key = f"nav_radio_{st.session_state['nav_target'].replace(' ', '_')}"
-section = st.sidebar.radio("Go to:", _options, index=_default_idx, key=_radio_key, label_visibility="collapsed")
-
+section = st.sidebar.radio(
+    "Go to:", _options, index=_default_idx,
+    key=f"nav_radio_{st.session_state['nav_target'].replace(' ', '_')}",
+    label_visibility="collapsed"
+)
 if section != st.session_state["nav_target"]:
     st.session_state["nav_target"] = section
 
@@ -136,53 +97,18 @@ def safe_tab(module_path: str, label: str):
     except Exception as e:
         st.warning(f"{label} – import error `{module_path}`: {e}")
 
-# ---------- Helpers: hero banners ----------
+# ---------- Hero helpers ----------
 def _render_hero():
-    if not hero_path.exists():
-        return
-    b = hero_path.read_bytes()
-    src = "data:image/jpg;base64," + base64.b64encode(b).decode("utf-8")
-    st.markdown(f'<div class="hero" style="background-image:url({src});"></div>', unsafe_allow_html=True)
+    if hero_path.exists():
+        b = hero_path.read_bytes()
+        src = "data:image/jpg;base64," + base64.b64encode(b).decode("utf-8")
+        st.markdown(f'<div class="hero" style="background-image:url({src});"></div>', unsafe_allow_html=True)
 
 def _render_hero_from(path: Path):
-    if not path.exists():
-        return
-    b = path.read_bytes()
-    src = "data:image/jpg;base64," + base64.b64encode(b).decode("utf-8")
-    st.markdown(f'<div class="hero" style="background-image:url({src});"></div>', unsafe_allow_html=True)
-
-# ---------- Helper: programmatic navigation ----------
-def _goto(target_section: str, target_tab: str | None = None):
-    st.session_state["nav_target"] = target_section
-    if target_tab:
-        st.session_state["pending_tab"] = target_tab
-    st.rerun()
-
-def _maybe_select_pending_tab():
-    target = st.session_state.pop("pending_tab", None)
-    if not target:
-        return
-    st.markdown(
-        f"""
-        <script>
-        const targetLabel = {target!r};
-        let tries = 0;
-        const clickTab = () => {{
-            tries += 1;
-            const tabs = window.parent.document.querySelectorAll('button[role="tab"]');
-            for (const t of tabs) {{
-                if ((t.innerText || t.textContent).trim() === targetLabel) {{
-                    t.click();
-                    return;
-                }}
-            }}
-            if (tries < 20) setTimeout(clickTab, 100);
-        }};
-        setTimeout(clickTab, 50);
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
+    if path.exists():
+        b = path.read_bytes()
+        src = "data:image/jpg;base64," + base64.b64encode(b).decode("utf-8")
+        st.markdown(f'<div class="hero" style="background-image:url({src});"></div>', unsafe_allow_html=True)
 
 # ---------- Routing ----------
 if section == "Home Page":
@@ -190,63 +116,50 @@ if section == "Home Page":
 
     st.title("Debt Capital Markets Workbench")
     st.markdown(
-        '<div class="subtitle">Your all-in-one platform for Debt Capital Markets analytics & execution · Master’s Thesis – Paris I Panthéon-Sorbonne</div>',
+        '<div class="subtitle">Your all-in-one platform for Debt Capital Markets analytics & execution · End-of-year Project – Paris I Panthéon-Sorbonne</div>',
         unsafe_allow_html=True
     )
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+    # ---- Overview : plein largeur ----
     st.markdown("#### Overview")
     st.markdown(
         """
         <p class="justify overview-text">
-        The Debt Capital Markets Workbench is a modular Streamlit application that consolidates core DCM workflows into a single, reproducible interface.
-        It supports rapid pricing scenarios, primary & secondary market analytics, execution utilities, and learning integrations. The roadmap includes market
-        data integrations (rates, credit curves, ESG frameworks), a copilot agent for repetitive tasks, and audit-ready exports to streamline transaction
-        preparation, governance materials, and performance tracking.
+        The Debt Capital Markets Workbench is a Streamlit application that consolidates core DCM workflows into a single interface.
+        It supports the entire activity cycle of the profession, from bond pricing and analysis to monitoring the data room and the competitive
+        DCM market, while also integrating learning tools to help newcomers understand. Below is a page-by-page explanation.
         </p>
         """,
         unsafe_allow_html=True,
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    col_left, col_sep, col_right = st.columns([1, 0.05, 1])
+    # ---- Page-by-page : deux colonnes ----
+    st.markdown("#### Page-by-page")
+    col_left, col_right = st.columns(2, vertical_alignment="top")
 
     with col_left:
-        st.markdown('<div class="section-head">Structuring Desk</div>', unsafe_allow_html=True)
-        st.markdown('<div class="pillbox">', unsafe_allow_html=True)
-        if st.button("Pricer", type="secondary", key="home_sd_pricer"):
-            _goto("Structuring Desk", "Pricer")
-        st.caption("Multi-product pricing tools and analytics")
-        if st.button("Tools", type="secondary", key="home_sd_tools"):
-            _goto("Structuring Desk", "Tools")
-        st.caption("Utilities for term sheets, fees, amortization")
-        # (optionnel) bouton vers Glossary
-        if st.button("Glossary & Learn More", type="secondary", key="home_sd_glossary"):
-            _goto("Structuring Desk", "Glossary & Learn More")
-        st.caption("Key concepts, definitions, references")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col_sep:
-        st.markdown('<div class="vertical-separator"></div>', unsafe_allow_html=True)
+        st.markdown("**Structuring Desk**")
+        st.markdown(
+            """
+- **Pricer**: A comprehensive bond pricing platform (vanilla bonds, zero-coupon bonds, convertibles, and sustainability-linked bonds). Simply input your parameters to access key metrics and tailored charts, accompanied by clear explanations.
+- **Tools**: Two essential deal tools — a customizable term sheet generator (Word format) and a cash flow amortization schedule builder.
+- **Glossary & Learn More**: Since this application is also aimed at newcomers to DCM, you’ll find a complete glossary, key formulas, and additional information on exotic bond types.
+            """.strip()
+        )
 
     with col_right:
-        st.markdown('<div class="section-head">Intelligence Desk</div>', unsafe_allow_html=True)
-        st.markdown('<div class="pillbox">', unsafe_allow_html=True)
-        if st.button("AI Agent", type="secondary", key="home_id_agent"):
-            _goto("Intelligence Desk", "AI Agent")
-        st.caption("Chatbot with memory and RAG on uploaded files")
-        if st.button("Latest News and Insights", type="secondary", key="home_id_news"):
-            _goto("Intelligence Desk", "Latest News and Insights")
-        st.caption("Aggregated news, rates dashboards, deal watch")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("**Intelligence Desk**")
+        st.markdown(
+            """
+- **AI Agent**: Explore the capabilities of an AI agent designed to support your data room. With active memory and advanced document-search functionalities, it is the ideal companion.
+- **Latest News and Insights**: This final section of the application provides a synthesis of the latest news, macroeconomic data from central banks, and a tracker of recent DCM deals with the banks involved.
+            """.strip()
+        )
 
 elif section == "Structuring Desk":
     _render_hero_from(hero_struct_path)
-
     st.title("Structuring Desk")
-    # ⚠️ 3 onglets: Pricer, Tools, Glossary & Learn More
     tab_pricer, tab_tools, tab_glossary = st.tabs(["Pricer", "Tools", "Glossary & Learn More"])
     with tab_pricer:
         safe_tab("Structuring.pricer", "Structuring Desk — Pricer")
@@ -254,15 +167,12 @@ elif section == "Structuring Desk":
         safe_tab("Structuring.tools", "Structuring Desk — Tools")
     with tab_glossary:
         safe_tab("Structuring.glossary", "Structuring Desk — Glossary & Learn More")
-    _maybe_select_pending_tab()
 
 elif section == "Intelligence Desk":
     _render_hero_from(hero_intel_path)
-
     st.title("Intelligence Desk")
     tab_agent, tab_news = st.tabs(["AI Agent", "Latest News and Insights"])
     with tab_agent:
         safe_tab("page2.agent", "Intelligence Desk — AI Agent")
     with tab_news:
         safe_tab("page2.news", "Intelligence Desk — Latest News and Insights")
-    _maybe_select_pending_tab()
