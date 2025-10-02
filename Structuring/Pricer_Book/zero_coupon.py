@@ -320,17 +320,28 @@ def render():
         st.subheader("Method overview")
 
         st.markdown(
-            "- **Analytical (Spot Curve):** We treat the bond’s single payoff at maturity as being discounted by the market "
-            "**term structure of zero rates**. If the zero curve is *flat* at level *z*, the price is "
-            "`Face × exp(−z × T)` under continuous compounding. With a **custom curve**, we integrate the instantaneous "
-            "spot rate over time (area under the curve) and exponentiate the negative of that integral. "
-            "This is the cleanest way to value a pure discount bond in a deterministic-rate world."
-        )
+    "- **Analytical (Spot Curve):** We discount the bond’s single payoff at maturity using the market’s "
+    "**zero-coupon yield curve** (or *spot curve*). This curve gives the interest rate for each maturity. "
+    "Example: at 1Y the market may require 3%, at 2Y 3.2%, and at 5Y 3.8%. "
+    "So the rate depends on maturity. The problem: if we want to value 100 in 5 years, "
+    "we cannot just take 3.8% directly — because during the 5 years the money did not grow at a constant pace: "
+    "it grew at 3% the first year, then 3.2%, then a bit more, etc. "
+    "The solution is to break time into small intervals, apply the corresponding rate on each, "
+    "and multiply all the discount factors together. In continuous time this becomes an integral of the short rates, "
+    "with an exponential negative sign: the exponential accumulates continuous compounding, "
+    "and the minus reflects discounting. "
+    "This gives the cleanest way to price a zero-coupon bond when rates vary with maturity."
+)
+
+        
         st.markdown(
-            "- **Monte Carlo (Short-Rate):** We simulate many future paths for the **instantaneous short rate** and average the "
-            "discounted payoff. We use a simple **mean-reverting** process: the rate tends to drift back toward a long-run level θ "
-            "at speed a, while random shocks with volatility σ push it around (often written as *dr = a(θ − r)dt + σ dW*)."
+            "- **Monte Carlo (Short-Rate):** This approach simulates many possible future paths for the **short rate**—the "
+            "instantaneous interest rate used to discount cash flows. The bond price is then obtained by averaging the discounted "
+            "payoffs across all scenarios. The short rate is modeled with a **mean-reverting process**: it tends to move back toward "
+            "a long-run level θ at speed a, while random shocks with volatility σ create fluctuations "
+            "(commonly written as *dr = a(θ − r)dt + σ dW*)."
         )
+
 
         # Example PDF download
         st.markdown("### Example — Download")
@@ -474,7 +485,7 @@ def render():
                 <div>Price sensitivity to small, parallel yield changes: approximately <em>%ΔPrice ≈ −ModDur × ΔYield</em> (yield in decimal). Useful for first-order risk.</div>
 
                 <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Convexity (yrs²)</div>
-                <div>Second-order curvature of the price–yield relation. Higher convexity means the duration estimate errs less for larger yield moves (price falls less when yields rise and rises more when yields fall).</div>
+                <div>Curvature measure of the price–yield relationship. Higher convexity improves the duration estimate for larger yield changes — prices drop less when yields rise and climb more when yields fall.</div>
 
                 <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Price-to-Par (%)</div>
                 <div>Price expressed as a percentage of the face value. &gt;100% = premium bond (coupon &gt; yield), &lt;100% = discount bond (coupon &lt; yield).</div>

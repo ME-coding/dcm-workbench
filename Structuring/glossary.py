@@ -1,291 +1,256 @@
+# Structuring/glossary.py
+# -----------------------------------------------------------------------------
+# DCM Workbench — Glossary & Learn More
+# -----------------------------------------------------------------------------
+
+from __future__ import annotations
 import streamlit as st
-import importlib
-from pathlib import Path
-import base64
+import pandas as pd
 
-# ---------- Page config ----------
-st.set_page_config(
-    page_title="Debt Capital Markets Workbench",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+def render():
+    st.subheader("Glossary & Learn More")
 
-# ---------- Paths (images) ----------
-logo_dir = Path(__file__).parent / "Images"
-escp_path = logo_dir / "image_escp.jpg"
-sorbonne_path = logo_dir / "image_sorbonne.jpg"
-hero_path = logo_dir / "background.jpg"
-hero_struct_path = logo_dir / "header-structuring.jpg"
-hero_intel_path = logo_dir / "header-intelligence.jpg"
+    tabs = st.tabs(["📘 Glossary (pricing & convertibles)", "🔎 Learn More (exotic bonds)"])
 
-# ---------- CSS ----------
-st.markdown(
-    """
-    <style>
-    :root{
-      --brand:#0b63c5;
-      --brand2:#1c2e6e;
-      --surface:rgba(255,255,255,.04);
-      --border:rgba(255,255,255,.18);
-      --text-muted:rgba(255,255,255,.72);
-      --toc-bg: rgba(255,255,255,.06);
-    }
-    .main .block-container{max-width:1200px;}
-
-    .hero{
-      width:100%;
-      height:220px;
-      border-radius:18px;
-      margin:.5rem 0 1.25rem 0;
-      background-size:cover;
-      background-position:center;
-      position:relative;
-      overflow:hidden;
-      border:2px solid var(--border);
-      box-shadow:0 10px 24px rgba(0,0,0,.18);
-    }
-    .hero::after{
-      content:"";
-      position:absolute; inset:0;
-      background:linear-gradient(90deg, rgba(12,18,28,.55), rgba(11,99,197,.18));
-    }
-
-    .subtitle{ font-size:1.15rem; font-weight:500; margin-top:0.25rem; margin-bottom:1rem; color:gray; }
-    .justify{ text-align:justify; text-justify:inter-word; }
-    .overview-text{ font-size:1.05rem; line-height:1.6; }
-
-    .card{ border:2px solid var(--border); border-radius:16px; padding:16px; background:var(--surface); }
-    .section-head{ font-weight:700; font-size:1.25rem; margin-bottom:.5rem; }
-
-    /* Boutons "pill" */
-    .pillbox div[data-testid="stButton"] > button[kind="secondary"]{
-      width:100%;
-      text-align:left;
-      border-radius:999px !important;
-      border:1.5px solid var(--border) !important;
-      background:rgba(11,99,197,.08) !important;
-      color:#cfe4ff !important;
-      box-shadow:none !important;
-      padding:10px 16px !important;
-      margin:.25rem 0;
-      transition:transform .08s ease, background .12s ease, border-color .12s ease;
-      font-weight:600;
-    }
-    .pillbox div[data-testid="stButton"] > button[kind="secondary"]::before{
-      content:"›";
-      display:inline-block;
-      margin-right:6px;
-      font-weight:700;
-      color:#9ec6ff;
-    }
-    .pillbox div[data-testid="stButton"] > button[kind="secondary"]:hover{
-      transform:translateY(-2px);
-      background:rgba(11,99,197,.14) !important;
-      border-color:rgba(11,99,197,.40) !important;
-    }
-
-    /* Sommaire : carré gris */
-    .toc{
-      border:2px solid var(--border);
-      background:var(--toc-bg);
-      border-radius:4px;  /* look "carré" */
-      padding:14px 14px 10px 14px;
-    }
-    .toc h5{ margin:.25rem 0 .6rem 0; font-size:1rem; font-weight:700; letter-spacing:.2px; }
-    .toc .group{ margin-top:.6rem; margin-bottom:.25rem; font-weight:700; opacity:.9; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# ---------- Sidebar ----------
-st.sidebar.title("Navigation")
-
-# Sync with query params (fallback deep-linking)
-qp = st.experimental_get_query_params()
-if "section" in qp:
-    st.session_state["nav_target"] = qp["section"][0].replace("_", " ")
-if "nav_target" not in st.session_state:
-    st.session_state["nav_target"] = "Home Page"
-
-_options = ["Home Page", "Structuring Desk", "Intelligence Desk"]
-_default_idx = _options.index(st.session_state["nav_target"])
-section = st.sidebar.radio(
-    "Go to:", _options, index=_default_idx,
-    key=f"nav_radio_{st.session_state['nav_target'].replace(' ', '_')}",
-    label_visibility="collapsed"
-)
-if section != st.session_state["nav_target"]:
-    st.session_state["nav_target"] = section
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("by [Maxime Eneau](https://www.linkedin.com/in/maxime-eneau/)", help="Author")
-
-c1, c2 = st.sidebar.columns(2)
-with c1:
-    if escp_path.exists():
-        st.image(str(escp_path), use_container_width=True)
-with c2:
-    if sorbonne_path.exists():
-        st.image(str(sorbonne_path), use_container_width=True)
-
-# ---------- Safe import helper ----------
-def safe_tab(module_path: str, label: str):
-    try:
-        mod = importlib.import_module(module_path)
-        getattr(mod, "render", lambda: st.info(f"{label} is empty.")).__call__()
-    except Exception as e:
-        st.warning(f"{label} – import error `{module_path}`: {e}")
-
-# ---------- Hero helpers ----------
-def _render_hero():
-    if hero_path.exists():
-        b = hero_path.read_bytes()
-        src = "data:image/jpg;base64," + base64.b64encode(b).decode("utf-8")
-        st.markdown(f'<div class="hero" style="background-image:url({src});"></div>', unsafe_allow_html=True)
-
-def _render_hero_from(path: Path):
-    if path.exists():
-        b = path.read_bytes()
-        src = "data:image/jpg;base64," + base64.b64encode(b).decode("utf-8")
-        st.markdown(f'<div class="hero" style="background-image:url({src});"></div>', unsafe_allow_html=True)
-
-# ---------- Programmatic navigation (deep links to tabs) ----------
-def _goto(target_section: str, target_tab: str | None = None):
-    st.session_state["nav_target"] = target_section
-    if target_tab:
-        st.session_state["pending_tab"] = target_tab
-        # also set query params as a fallback
-        st.experimental_set_query_params(
-            section=target_section.replace(" ", "_"),
-            tab=target_tab.replace(" ", "_")
-        )
-    else:
-        st.experimental_set_query_params(section=target_section.replace(" ", "_"))
-    st.rerun()
-
-def _maybe_select_pending_tab():
-    # also read from query params as a safety net
-    if "pending_tab" not in st.session_state and "tab" in qp:
-        st.session_state["pending_tab"] = qp["tab"][0].replace("_", " ")
-
-    target = st.session_state.pop("pending_tab", None)
-    if not target:
-        return
-    st.markdown(
-        f"""
-        <script>
-        (function() {{
-          const TARGET = {target!r};
-          let tries = 0;
-          function clickTab() {{
-            tries += 1;
-            const root = window.parent?.document || document;
-            const tabs = root.querySelectorAll('button[role="tab"]');
-            for (const t of tabs) {{
-              const txt = (t.innerText || t.textContent || "").trim();
-              if (txt === TARGET) {{ t.click(); return; }}
-            }}
-            if (tries < 200) setTimeout(clickTab, 120);
-          }}
-          // Wait a bit for Streamlit to paint tabs
-          setTimeout(clickTab, 300);
-        }})();
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# ---------- Routing ----------
-if section == "Home Page":
-    _render_hero()
-
-    st.title("Debt Capital Markets Workbench")
-    st.markdown(
-        '<div class="subtitle">Your all-in-one platform for Debt Capital Markets analytics & execution · End-of-year Project – Paris I Panthéon-Sorbonne</div>',
-        unsafe_allow_html=True
-    )
-
-    # ---- Overview block: left (text + page-by-page) / right (TOC square) ----
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("#### Overview")
-
-    left, right = st.columns([0.6, 0.4], vertical_alignment="top")
-    with left:
-        # Overview paragraph
+    # =========================================================================
+    # 📘 GLOSSARY  ———  >>> PARTIE MODIFIÉE SEULEMENT <<<
+    # =========================================================================
+    with tabs[0]:
+        # Intro plus pédagogique (public: connaît la finance, moins le DCM)
         st.markdown(
-            """
-            <p class="justify overview-text">
-            The Debt Capital Markets Workbench is a Streamlit application that consolidates core DCM workflows into a single interface.
-            It supports the entire activity cycle of the profession, from bond pricing and analysis to monitoring the data room and the competitive
-            DCM market, while also integrating learning tools to help newcomers understand. Below is a page-by-page explanation.
-            </p>
-            """,
-            unsafe_allow_html=True,
+            "This glossary provides a DCM dictionary of key vocabulary and formulas to better understand bond pricing methodologies."
         )
-        # Page-by-page directly under Overview (left column)
-        st.markdown("#### Page-by-page")
+
+        # --- Données Glossaire (titres sans abréviations) --------------------
+        entries = [
+            # ===== Pricing — Core (en premier) =====
+            {
+                "Category": "Pricing — Core",
+                "Term": "Present Value (Bond Price)",
+                "FormulaLatex": r"P=\sum_{t=1}^{N}\frac{C}{\left(1+\frac{y}{m}\right)^{t}}+\frac{F}{\left(1+\frac{y}{m}\right)^{N}}",
+                "Interpretation": (
+                    "The bond price equals the discounted value of all coupon payments plus the redemption of face value. "
+                    "If investors demand a higher yield (they want a higher return), each future payment is discounted more heavily, so the price falls. At the opposite, a lower required yield raises the price."
+                )
+            },
+            {
+                "Category": "Pricing — Core",
+                "Term": "Coupon Rate",
+                "FormulaLatex": r"\text{Coupon Rate}=\dfrac{\text{Annual Coupon}}{F}",
+                "Interpretation": (
+                    "The coupon rate is the fixed percentage of face value that determines the annual coupon amount; "
+                    "periodic coupons equal the annual coupon divided by the number of payments per year."
+                )
+            },
+            {
+                "Category": "Pricing — Core",
+                "Term": "Current Yield",
+                "FormulaLatex": r"\text{Current Yield}=\dfrac{\text{Annual Coupon}}{P}",
+                "Interpretation": (
+                    "The current yield measures the income a bond generates each year relative to its current market price. It shows the return coming only from coupon payments at today’s price and does not consider the time value of money or any gain or loss you could make when the bond matures or is sold."
+                )
+            },
+            {
+                "Category": "Pricing — Core",
+                "Term": "Yield to Maturity",
+                "FormulaLatex": r"P=\sum_{t=1}^{N}\frac{C}{(1+\text{Yield to Maturity})^{t}}+\frac{F}{(1+\text{Yield to Maturity})^{N}}",
+                "Interpretation": (
+                    "The internal rate of return of the bond if held to maturity and coupons are reinvested at the same rate; "
+                    "it is the discount rate that exactly reproduces the market price."
+                )
+            },
+            {
+                "Category": "Pricing — Core",
+                "Term": "Accrued Interest and Clean versus Dirty Price",
+                "FormulaLatex": r"\text{Dirty Price}=\text{Clean Price}+\text{Accrued Interest},\quad \text{Accrued Interest}= \text{Coupon}\times \dfrac{\text{Days since last}}{\text{Days in period}}",
+                "Interpretation": (
+                    "The quoted (or clean) price of a bond is the market price shown on trading platforms and does not include the interest that has built up since the last coupon payment. The cash (or dirty) price is the actual amount a buyer pays when purchasing the bond; it equals the quoted price plus the interest accrued since the previous payment. The portion of interest to add is determined by how many days have passed in the current coupon period, calculated according to the market’s chosen day-count convention."
+                )
+            },
+            {
+                "Category": "Pricing — Core",
+                "Term": "Day-Count Convention (overview)",
+                "FormulaLatex": r"\text{Accrued Interest}\propto \dfrac{\text{Actual or 30 days since last}}{\text{Actual or 360 days in period}}",
+                "Interpretation": (
+                    "Markets use **day-count conventions** such as **Actual/Actual**, **30/360**, or **Actual/360** to measure the fraction of a coupon period that has passed. "
+    "Because **accrued interest is ∝ (proportional to)** this fraction, the choice affects the dirty price and quoted yield. "
+    "For example, under **30/360**, 45 days since the last coupon give 45/360 = 0.125, so about one-eighth of the annual coupon is added as accrued interest."
+                )
+            },
+
+            # ===== Convertibles (fusion des sous-catégories) =====
+            {
+                "Category": "Convertibles",
+                "Term": "Conversion Ratio",
+                "FormulaLatex": r"\text{Conversion Ratio}=\dfrac{\text{Face Value}}{\text{Conversion Price}}",
+                "Interpretation": "Number of shares received when one bond is converted at the stated conversion price."
+            },
+            {
+                "Category": "Convertibles",
+                "Term": "Conversion Value (also called Parity)",
+                "FormulaLatex": r"\text{Conversion Value}=\text{Share Price}\times \text{Conversion Ratio}",
+                "Interpretation": "Equity value embedded in the convertible if it were converted at the current share price."
+            },
+            {
+                "Category": "Convertibles",
+                "Term": "Conversion Premium",
+                "FormulaLatex": r"\text{Conversion Premium}=\dfrac{\text{Convertible Price}-\text{Conversion Value}}{\text{Conversion Value}}",
+                "Interpretation": "Percentage markup investors pay above immediate equity value in exchange for downside protection."
+            },
+            {
+                "Category": "Convertibles",
+                "Term": "Break-Even Time",
+                "FormulaLatex": r"\text{Break-Even (years)}=\dfrac{\text{Conversion Premium}}{\text{Yield on Convertible}-\text{Dividend Yield on Shares}}",
+                "Interpretation": "Years of income advantage needed for the convertible to recoup its premium relative to the underlying shares."
+            },
+            {
+                "Category": "Convertibles",
+                "Term": "Investment Value and Floor",
+                "FormulaLatex": r"\text{Investment Value}=\sum_{t=1}^{N}\dfrac{CF_t}{(1+r_{\text{straight}})^{t}},\quad \text{Floor}=\max\{\text{Conversion Value},\ \text{Investment Value}\}",
+                "Interpretation": "Minimum economic value of a convertible: the greater of its equity value if converted and its straight-bond value."
+            },
+            {
+                "Category": "Convertibles",
+                "Term": "Adjusted Duration of a Convertible Bond",
+                "FormulaLatex": r"D_{\text{adjusted}}\approx D_{\text{convertible}}\!\left(1-\dfrac{\text{Equity Component}}{\text{Total Value}}\right)",
+                "Interpretation": "Equity participation reduces interest-rate sensitivity; a larger equity component leads to lower duration."
+            },
+
+            # ===== Risk — Interest Rate Sensitivity =====
+            {
+                "Category": "Risk — Interest Rate Sensitivity",
+                "Term": "Macaulay Duration",
+                "FormulaLatex": r"D=\dfrac{\sum_{t=1}^{N}\dfrac{t\cdot CF_t}{(1+i)^{t}}}{\sum_{t=1}^{N}\dfrac{CF_t}{(1+i)^{t}}}",
+                "Interpretation": "Macaulay duration is the average time it takes to get your money back from a bond, weighted by the size and timing of each payment. A longer duration means the bond’s price is more sensitive to interest rate changes."
+            },
+            {
+                "Category": "Risk — Interest Rate Sensitivity",
+                "Term": "Modified Duration",
+                "FormulaLatex": r"D_{\text{modified}}=\dfrac{D}{1+i}",
+                "Interpretation": "Modified duration shows how much a bond’s price will change for a small change in yield. It gives an approximate percentage price move: a modified duration of 5 means the price falls about 5% if yield rises by 1%."
+            },
+            {
+                "Category": "Risk — Interest Rate Sensitivity",
+                "Term": "Convexity (outline)",
+                "FormulaLatex": r"\dfrac{\Delta P}{P}\approx -D_{\text{modified}}\Delta y+\tfrac{1}{2}\text{Convexity}\cdot(\Delta y)^2",
+                "Interpretation": (
+    "Convexity refines the estimate of how a bond’s price reacts to interest rate changes beyond what duration alone can show. "
+    "While duration gives a straight-line approximation, the true price–yield relationship is curved. "
+    "A bond with high convexity loses less value when yields rise and gains more when yields fall, offering better protection against large rate moves by accounting for this curvature. "
+    "The expression ΔP/P represents the percentage change in a bond’s price when the yield changes by Δy. "
+    "The first part, −Dmodified Δy, is the duration effect — the slope of the price–yield curve at the starting point, giving a linear estimate for small shifts in yield. "
+    "The second part, ½ × Convexity × (Δy)², is the convexity adjustment, correcting for the curve’s shape. "
+    "Together, duration handles local, small changes, while convexity makes the estimate more accurate when yield moves are larger. "
+    "Convexity is calculated by weighting each future cash flow by the square of its time to payment and discounting it at the bond’s yield, then scaling by the bond’s price; it can also be approximated by repricing the bond at slightly higher and lower yields to measure curvature."
+)
+
+            },
+        ]
+
+        df = pd.DataFrame(entries)
+
+        # --- Contrôles (filtre + mode tableau) --------------------------------
+        col1, col2 = st.columns([1,1])
+        with col1:
+            q = st.text_input("Filter by term or category", "")
+        with col2:
+            table_mode = st.toggle("Show compact table view", value=False)
+
+        if q:
+            mask = df["Term"].str.contains(q, case=False, na=False) | df["Category"].str.contains(q, case=False, na=False)
+            df = df[mask]
+
+        # Ordre des catégories (Pricing — Core en premier)
+        cat_order = ["Pricing — Core", "Convertibles", "Risk — Interest Rate Sensitivity"]
+        df["__cat_rank"] = df["Category"].apply(lambda c: cat_order.index(c) if c in cat_order else 999)
+
+        # --- Rendu -------------------------------------------------------------
+        if table_mode:
+            out = df.sort_values(["__cat_rank", "Category", "Term"])[["Category", "Term", "FormulaLatex", "Interpretation"]]
+            out = out.rename(columns={"FormulaLatex": "Formula"})
+            st.dataframe(out, use_container_width=True, hide_index=True)
+        else:
+            for cat, block in (
+                df.sort_values(["__cat_rank", "Term"])
+                  .groupby("Category", sort=False)
+            ):
+                with st.expander(f"🔹 {cat}", expanded=(cat == "Pricing — Core")):
+                    for _, row in block.sort_values("Term").iterrows():
+                        st.markdown(f"**{row['Term']}**")
+                        st.latex(row["FormulaLatex"])
+                        st.markdown(f"*{row['Interpretation']}*")
+                        st.markdown("---")  # dashed separator between terms
+
+            # --------- Légende des symboles / variables utilisées --------------
+            st.markdown("#### Notation and inputs used in formulas")
+            st.markdown(
+                """
+- **P**: Present value or market price of the bond at settlement.  
+- **F**: Face value (also called par value or principal) repaid at maturity.  
+- **C**: Coupon payment per period (annual coupon divided by number of payments per year).  
+- **y**: Nominal annual required yield (quoted yield); **m**: number of coupon payments per year; the per-period rate is *y / m*.  
+- **N**: Total number of coupon periods remaining until maturity; **t**: period index (1, 2, …, N).  
+- **CFₜ**: Cash flow paid at period *t* (coupon or coupon plus redemption at maturity).  
+- **i**: Effective discount rate per period used in duration and convexity formulas.  
+- **Days since last / Days in period**: Fraction of the coupon period used to compute accrued interest (per the day-count convention).  
+- **Share Price**: Current price of the underlying share for a convertible bond.  
+- **Conversion Price**: Price per share at which the bond converts into equity; set at issuance (subject to anti-dilution provisions).  
+- **Face Value (for convertibles)**: Principal amount used to compute the conversion ratio.  
+- **Yield on Convertible**: Yield to maturity calculated on the convertible bond’s market price.  
+- **Dividend Yield on Shares**: Expected cash dividends divided by the current share price.  
+- **Straight-Bond Discount Rate**: Yield appropriate for valuing the bond component of a convertible (credit- and term-matched).  
+                """
+            )
+
+    # =========================================================================
+    # 🔎 LEARN MORE  ———  (inchangé)
+    # =========================================================================
+    with tabs[1]:
         st.markdown(
-            """
-- **Pricer**: A comprehensive bond pricing platform (vanilla bonds, zero-coupon bonds, convertibles, and sustainability-linked bonds). Simply input your parameters to access key metrics and tailored charts, accompanied by clear explanations.
-- **Tools**: Two essential deal tools — a customizable term sheet generator (Word format) and a cash flow amortization schedule builder.
-- **Glossary & Learn More**: Since this application is also aimed at newcomers to DCM, you’ll find a complete glossary, key formulas, and additional information on exotic bond types.
-- **AI Agent**: Explore the capabilities of an AI agent designed to support your data room. With active memory and advanced document-search functionalities, it is the ideal companion.
-- **Latest News and Insights**: This final section of the application provides a synthesis of the latest news, macroeconomic data from central banks, and a tracker of recent DCM deals with the banks involved.
-            """.strip()
+            "There are many bond types designed to meet different issuer and investor needs. Here is a **non-exhaustive** list to spark curiosity and further exploration!"
         )
 
-    with right:
-        st.markdown('<div class="toc">', unsafe_allow_html=True)
-        st.markdown("<h5>Table of contents</h5>", unsafe_allow_html=True)
+        sections = [
+            ("Based on Issuer",
+             [
+                 ("Bulldog Bond", "A sterling-denominated bond issued in the U.K. by a non-British entity."),
+                 ("Dim Sum Bond", "A renminbi-denominated bond issued outside mainland China, typically in Hong Kong."),
+                 ("Formosa Bond", "A Taiwan-issued bond, typically denominated in foreign currencies like USD, sold to local investors."),
+                 ("Kangaroo Bond", "An Australian dollar-denominated bond issued in Australia by a non-Australian entity."),
+                 ("Maple Bond", "A Canadian dollar-denominated bond issued in Canada by a non-Canadian entity."),
+                 ("Masala Bond", "A rupee-denominated bond issued outside India by Indian entities to attract foreign investors."),
+                 ("Panda Bond", "A renminbi-denominated bond issued in mainland China by foreign issuers."),
+                 ("Samurai Bond", "A yen-denominated bond issued in Japan by a foreign entity, targeting Japanese investors."),
+                 ("Sukuk (Islamic Bond)", "A Sharia-compliant instrument where investors receive returns linked to asset performance rather than interest."),
+                 ("Yankee Bond", "A U.S. dollar-denominated bond issued in the U.S. by a non-U.S. entity."),
+             ]),
+            ("Based on Structure",
+             [
+                 ("GDP-Linked Bond", "A sovereign instrument where coupon or principal is tied to the issuer country’s GDP growth."),
+                 ("Perpetual Bond (Perp)", "A bond with no maturity date that pays coupons indefinitely."),
+                 ("Step-Up Bond", "A bond whose coupon increases at predetermined intervals or upon trigger events."),
+             ]),
+            ("Environment-Linked Bonds",
+             [
+                 ("Blue Bond", "A sustainability-focused bond financing marine and ocean-related projects."),
+                 ("Carbon Credit Bond", "Debt tied to revenues from carbon credit markets, financing green transition projects."),
+                 ("Catastrophe Bond (Cat Bond)", "A high-yield bond transferring natural disaster risk from insurers to capital markets."),
+                 ("Cocoa Bond", "A commodity-linked bond where payments depend on cocoa price levels."),
+                 ("Debt-for-Nature Swap Bond", "A bond structure where debt is exchanged for commitments to fund environmental conservation."),
+                 ("Outcome Bond (Social Impact Bond)", "A performance-linked instrument where returns depend on achieving pre-agreed social outcomes."),
+             ]),
+            ("Next-Gen",
+             [
+                 ("Tokenized Bond", "A digital bond issued and traded on blockchain platforms for greater transparency and settlement efficiency."),
+                 ("Volcano Bond", "A bitcoin-backed sovereign bond issued by El Salvador to fund geothermal energy from volcanoes."),
+             ]),
+        ]
 
-        st.markdown('<div class="group">Structuring Desk</div>', unsafe_allow_html=True)
-        st.markdown('<div class="pillbox">', unsafe_allow_html=True)
-        if st.button("Pricer", type="secondary", key="toc_sd_pricer"):
-            _goto("Structuring Desk", "Pricer")
-        if st.button("Tools", type="secondary", key="toc_sd_tools"):
-            _goto("Structuring Desk", "Tools")
-        if st.button("Glossary & Learn More", type="secondary", key="toc_sd_glossary"):
-            _goto("Structuring Desk", "Glossary & Learn More")
-        st.markdown('</div>', unsafe_allow_html=True)
+        for title, items in sections:
+            st.markdown(f"### {title}")
+            for name, desc in sorted(items, key=lambda x: x[0].lower()):
+                st.markdown(f"- **{name}**: {desc}")
 
-        st.markdown('<div class="group" style="margin-top:.85rem;">Intelligence Desk</div>', unsafe_allow_html=True)
-        st.markdown('<div class="pillbox">', unsafe_allow_html=True)
-        if st.button("AI Agent", type="secondary", key="toc_id_agent"):
-            _goto("Intelligence Desk", "AI Agent")
-        if st.button("Latest News and Insights", type="secondary", key="toc_id_news"):
-            _goto("Intelligence Desk", "Latest News and Insights")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('</div>', unsafe_allow_html=True)  # end .toc
-
-    st.markdown('</div>', unsafe_allow_html=True)  # end .card
-
-elif section == "Structuring Desk":
-    _render_hero_from(hero_struct_path)
-    st.title("Structuring Desk")
-
-    # Tabs (deep-linked targets)
-    tab_pricer, tab_tools, tab_glossary = st.tabs(["Pricer", "Tools", "Glossary & Learn More"])
-    with tab_pricer:
-        safe_tab("Structuring.pricer", "Structuring Desk — Pricer")
-    with tab_tools:
-        safe_tab("Structuring.tools", "Structuring Desk — Tools")
-    with tab_glossary:
-        # >>> ceci charge bien Structuring/glossary.py (fichier fourni)
-        safe_tab("Structuring.glossary", "Structuring Desk — Glossary & Learn More")
-
-    _maybe_select_pending_tab()
-
-elif section == "Intelligence Desk":
-    _render_hero_from(hero_intel_path)
-    st.title("Intelligence Desk")
-
-    tab_agent, tab_news = st.tabs(["AI Agent", "Latest News and Insights"])
-    with tab_agent:
-        safe_tab("page2.agent", "Intelligence Desk — AI Agent")
-    with tab_news:
-        safe_tab("page2.news", "Intelligence Desk — Latest News and Insights")
-
-    _maybe_select_pending_tab()
+if __name__ == "__main__":
+    st.set_page_config(page_title="Glossary & Learn More", page_icon="📘", layout="wide")
+    render()

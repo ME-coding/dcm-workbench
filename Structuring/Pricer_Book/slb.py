@@ -123,7 +123,7 @@ A **€500 million 10-year fixed-rate bond** (base coupon **2.625%**) whose **20
 
         # Texte + slider pour Scope 1 & 2
         st.markdown(
-            "Reduction of the absolute Scope 1 and 2 CO₂ emissions "
+            "1/ Reduction of the absolute Scope 1 and 2 CO₂ emissions "
             "(<u><b>objective: >33%</b></u>)",
             unsafe_allow_html=True
         )
@@ -131,7 +131,7 @@ A **€500 million 10-year fixed-rate bond** (base coupon **2.625%**) whose **20
 
         # Texte + slider pour waste
         st.markdown(
-            "Reduction of non-recovered production waste "
+            "2/ Reduction of non-recovered production waste "
             "(<u><b>objective: >80%</b></u>)",
             unsafe_allow_html=True
         )

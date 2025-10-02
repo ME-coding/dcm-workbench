@@ -201,7 +201,9 @@ def render():
             "- **Yield-to-Maturity (YTM) Method:** This method involves calculating the present value of all future cash flows from the bond, assuming the bond is held until maturity, and discounting them using the bond's yield-to-maturity. The YTM is the interest rate that makes the present value of the bond's cash flows equal to its current market price."
         )
         st.markdown(
-            "- **Discounted Cash Flow (DCF) Method:** This method involves projecting the bond's cash flows over its remaining life, discounting them back to their present value using an appropriate discount rate, and summing them to arrive at the bond's price."
+            "- **Discounted Cash Flow (DCF) Method:** This method involves projecting the bond's cash flows over its remaining life, discounting them back to their present value using an appropriate discount rate, and summing them to arrive at the bond's price. "
+            "<span style='color:gray'>Unlike the YTM method, DCF lets you choose a discount rate other than the bond’s own yield, making it useful when market conditions or risk assumptions differ.</span>",
+            unsafe_allow_html=True
         )
         st.markdown(
             "- **Relative Value Method:** This method involves comparing the bond's yield to the yields of other bonds with similar characteristics, such as credit rating, maturity, and coupon rate. This can help determine whether the bond is undervalued or overvalued relative to its peers."
@@ -348,7 +350,7 @@ def render():
                 <div>Price sensitivity to small, parallel yield changes: approximately <em>%ΔPrice ≈ −ModDur × ΔYield</em> (yield in decimal). Useful for first-order risk.</div>
 
                 <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Convexity (yrs²)</div>
-                <div>Second-order curvature of the price–yield relation. Higher convexity means the duration estimate errs less for larger yield moves (price falls less when yields rise and rises more when yields fall).</div>
+                <div>Curvature measure of the price–yield relationship. Higher convexity improves the duration estimate for larger yield changes — prices drop less when yields rise and climb more when yields fall.</div>
 
                 <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Price-to-Par (%)</div>
                 <div>Price expressed as a percentage of the face value. &gt;100% = premium bond (coupon &gt; yield), &lt;100% = discount bond (coupon &lt; yield).</div>

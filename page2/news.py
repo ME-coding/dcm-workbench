@@ -781,7 +781,7 @@ def render_macroeconomics_dashboard():
         )
         plot_long["Series"] = plot_long["Series"].map(series_labels)
 
-        st.markdown("##### US−FR & FR−DE 10Y Long-Term Government Bond Yield Spreads (OECD/MEI, Monthly) — Last 10 Years")
+        st.markdown("##### Spreads over the last 10 years: US−French & FR−German 10Y Long-Term Government Bond Yield Spreads (OECD/MEI, Monthly)")
 
         zero_line = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(strokeDash=[6, 4]).encode(y="y:Q")
 
