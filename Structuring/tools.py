@@ -428,20 +428,21 @@ def tool_amortization():
         var_name="Component", value_name="Amount"
     )
 
-    # --- Title outside the chart (prevents clipping)
-    st.markdown("##### Cashflows (stacked) & Outstanding profile")
+    # --- Dynamic title outside the chart (prevents clipping)
+    nice_structure = structure.replace("_", " ").title()
+    st.markdown(f"##### Cash Flow Stacked Bars & Remaining Outstanding Balance Curve — {nice_structure}, {freq_label}")
 
     # --- Bars (legend at bottom)
     bars = alt.Chart(bars_df).mark_bar().encode(
         x=alt.X("Time (years):Q", title="Time (years)"),
-        y=alt.Y("Amount:Q", stack="zero", title="Cashflow"),
+        y=alt.Y("Amount:Q", stack="zero", title="Cash flow"),
         color=alt.Color(
             "Component:N",
             sort=["Interest/Coupon", "Principal"],
             legend=alt.Legend(title=None, orient="bottom")
         ),
         tooltip=[
-            alt.Tooltip("Period:Q"),
+            alt.Tooltip("Period:Q", title="Period"),
             alt.Tooltip("Time (years):Q", format=",.2f"),
             alt.Tooltip("Component:N"),
             alt.Tooltip("Amount:Q", format=",.2f"),
@@ -453,13 +454,13 @@ def tool_amortization():
         x=alt.X("Time (years):Q"),
         y=alt.Y(
             "Outstanding (end):Q",
-            title="Outstanding",
+            title="Outstanding (end of period)",
             axis=alt.Axis(orient="right", labelAlign="left", labelPadding=4, titlePadding=8)
         ),
         tooltip=[
-            alt.Tooltip("Period:Q"),
+            alt.Tooltip("Period:Q", title="Period"),
             alt.Tooltip("Time (years):Q", format=",.2f"),
-            alt.Tooltip("Outstanding (end):Q", format=",.2f"),
+            alt.Tooltip("Outstanding (end):Q", title="Outstanding", format=",.2f"),
         ],
     )
 
@@ -477,6 +478,16 @@ def tool_amortization():
 
     st.altair_chart(chart, use_container_width=True)
 
+    # --- Explanatory paragraph (grey)
+    st.caption(
+        "This chart splits each payment into **Interest/Coupon** and **Principal** (stacked bars, left axis) "
+        "and tracks the **remaining outstanding balance at the end of each period** (line, right axis). "
+        "In a **bullet** structure, the outstanding balance stays near the initial notional and drops to zero only at maturity; "
+        "with **equal principal**, the balance declines linearly and early payments are interest-heavy; "
+        "with an **annuity**, the **total payment per period is constant** while the mix gradually shifts "
+        "from mostly interest at the start to mostly principal near maturity."
+    )
+
     st.download_button(
         "Download amortization (CSV)",
         data=df.to_csv(index=False).encode("utf-8"),
@@ -484,7 +495,6 @@ def tool_amortization():
         mime="text/csv",
         key="amort_dl_csv",
     )
-
 
 # ============================================================
 # Main render()

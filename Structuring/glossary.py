@@ -10,7 +10,7 @@ import pandas as pd
 def render():
     st.subheader("Glossary & Learn More")
 
-    tabs = st.tabs(["📘 Glossary (pricing & convertibles)", "🔎 Learn More (exotic bonds)"])
+    tabs = st.tabs(["📘 Glossary (vocabulary and formulas)", "🔎 Learn More (exotic bonds)"])
 
     # =========================================================================
     # 📘 GLOSSARY  ———  >>> PARTIE MODIFIÉE SEULEMENT <<<

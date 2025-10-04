@@ -8,8 +8,7 @@ from Structuring.Pricer_Book.zero_coupon import render as zero_coupon_ui
 def render():
     st.subheader("Structuring Desk — Pricer")
     st.markdown(
-        "In this Pricer, we’ll progressively add modules. "
-        "Pick a tab below to explore the product family."
+        "The Pricer page groups bond valuation tools — vanilla, zero-coupon, convertible, and SLB — with clear inputs, visuals, and key metrics for quick, practical analysis."
     )
 
     tabs = st.tabs([
