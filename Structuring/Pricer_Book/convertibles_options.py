@@ -1,6 +1,6 @@
 # convertibles_options.py — Streamlit sub-page (Convertible & Options)
-# Pricing a convertible (conversion + investor put + issuer call) via a binomial tree.
-# UI layout mirrors your Vanilla Bond page.
+# Pricing a convertible (conversion + optional issuer call) via a binomial tree.
+# Chart removed for now (placeholder).
 
 from __future__ import annotations
 
@@ -10,14 +10,15 @@ from pathlib import Path
 import math
 
 import numpy as np
-import pandas as pd
-import altair as alt
 import streamlit as st
 
 
 # =========================
 #    Model & utilities
 # =========================
+
+# Fixed number of steps for the binomial tree (precision without being too heavy)
+_STEPS_FIXED = 240  # ~monthly over 20 years; adjust if needed
 
 @dataclass
 class ConvSpec:
@@ -37,17 +38,13 @@ class ConvSpec:
     # Conversion
     conv_ratio: float = 1.5       # shares per bond
 
-    # Embedded options (ALWAYS ON)
-    callable: bool = True
+    # Embedded option (CALL only, optional)
+    callable: bool = False
     call_price: float = 105.0
     call_start_year: float = 3.0  # earliest call date (in years)
 
-    putable: bool = True
-    put_price: float = 95.0
-    put_start_year: float = 2.0   # earliest put date (in years)
-
-    # Tree discretization
-    steps: int = 200              # binomial steps
+    # Tree discretization (fixed, not exposed to UI)
+    steps: int = _STEPS_FIXED
 
 
 def _coupon_per_period(spec: ConvSpec) -> float:
@@ -79,7 +76,7 @@ def _binomial_params(spec: ConvSpec):
     dt = T / N
     u = math.exp(spec.vol * math.sqrt(dt))
     d = 1.0 / u
-    a = math.exp((spec.r - spec.div_yield) * dt)  # growth factor under q
+    a = math.exp((spec.r - spec.div_yield) * dt)  # growth factor under Q
     p = (a - d) / (u - d)
     p = min(max(p, 0.0), 1.0)  # numerical guard
     return N, dt, u, d, p
@@ -89,19 +86,14 @@ def _call_is_active(spec: ConvSpec, t_years: float) -> bool:
     return spec.callable and (t_years >= spec.call_start_year)
 
 
-def _put_is_active(spec: ConvSpec, t_years: float) -> bool:
-    return spec.putable and (t_years >= spec.put_start_year)
-
-
 def _binomial_convertible_pricer(spec: ConvSpec) -> float:
     """
-    Convertible bond pricing via backward induction on a CRR tree.
+    Convertible bond pricing via backward induction on a CRR equity tree.
 
     Per-node logic:
       • Base investor decision: max(conversion value, continuation value)
-      • If put is active: max(put price, conversion, continuation)
-      • If call is active: min(continuation, max(conversion, call price))
-        (issuer calls when cheaper than letting it continue; investor would convert if conversion > call price)
+      • If call is active: issuer may settle at min( node value , max(conversion, call price) )
+        (issuer calls when cheaper than letting it continue; investor converts if conversion > call price)
       • Continuation discounted at (r + credit_spread) to reflect bond-leg credit risk
     """
     N, dt, u, d, p = _binomial_params(spec)
@@ -121,7 +113,7 @@ def _binomial_convertible_pricer(spec: ConvSpec) -> float:
     for idx in coupon_indices:
         pay_coupon[idx] = coupon_per
 
-    # Terminal payoff
+    # Terminal payoff (max of redemption vs immediate conversion)
     conv_val_T = spec.conv_ratio * S_T
     V = np.maximum(spec.face, conv_val_T)
 
@@ -132,21 +124,17 @@ def _binomial_convertible_pricer(spec: ConvSpec) -> float:
         j_idx = np.arange(0, n + 1)
         S_n = spec.s0 * (u ** j_idx) * (d ** (n - j_idx))
 
-        # Continuation: discounted risk-neutral expectation + coupon if due at end of step n
+        # Continuation: discounted RN expectation + coupon if due at end of step n
         V_cont_next = p * V[1:n + 2] + (1.0 - p) * V[0:n + 1]
         V_cont = disc * V_cont_next + pay_coupon[n]
 
         # Immediate conversion
         V_conv = spec.conv_ratio * S_n
 
-        # Base node value
+        # Base node value (investor choice: convert vs continue)
         V_node = np.maximum(V_conv, V_cont)
 
-        # Investor put (if active)
-        if _put_is_active(spec, t_n1):
-            V_node = np.maximum(V_node, spec.put_price)
-
-        # Issuer call (if active)
+        # Issuer call (if active): issuer can settle at better of (call price, immediate conversion)
         if _call_is_active(spec, t_n1):
             call_settlement = np.maximum(V_conv, spec.call_price)
             V_node = np.minimum(V_node, call_settlement)
@@ -210,20 +198,24 @@ def render():
     with colTL:
         st.subheader("Parameters")
 
-        # Bond block
-        face = st.number_input("Face value", value=100.0, step=1.0, format="%.2f", key="cv_face")
-        coupon_rate = st.number_input("Annual coupon (%)", value=2.00, step=0.25, format="%.2f", key="cv_cpn") / 100.0
+        # Compact layout: two columns (maturity stays a slider; others are inputs)
+        p_left, p_right = st.columns(2)
 
-        freq_label_to_val = {
-            "Annual (1x)": 1,
-            "Semiannual (2x)": 2,
-            "Quarterly (4x)": 4,
-            "Monthly (12x)": 12,
-        }
-        freq_label = st.selectbox("Coupon frequency", list(freq_label_to_val.keys()), index=1, key="cv_freq_lbl")
-        freq = int(freq_label_to_val[freq_label])
+        with p_left:
+            face = st.number_input("Face value", value=100.0, step=1.0, format="%.2f", key="cv_face")
+            coupon_rate = st.number_input("Annual coupon (%)", value=2.00, step=0.25, format="%.2f", key="cv_cpn") / 100.0
 
-        years = float(st.slider("Maturity (years)", min_value=1, max_value=30, value=5, step=1, key="cv_mat"))
+        with p_right:
+            freq_label_to_val = {
+                "Annual (1x)": 1,
+                "Semiannual (2x)": 2,
+                "Quarterly (4x)": 4,
+                "Monthly (12x)": 12,
+            }
+            freq_label = st.selectbox("Coupon frequency", list(freq_label_to_val.keys()), index=1, key="cv_freq_lbl")
+            freq = int(freq_label_to_val[freq_label])
+            years = float(st.slider("Maturity (years)", min_value=1, max_value=30, value=5, step=1, key="cv_mat"))
+
         st.caption("Bond leg: coupons are paid at the chosen frequency; the face value is redeemed at maturity.")
 
         # ---- Equity & market (compact: two columns) ----
@@ -240,18 +232,19 @@ def render():
 
         st.caption("Equity & market: stock dynamics drive the conversion option; coupons/continuation are discounted at (r + credit spread).")
 
-        # ---- Embedded options (always enabled) ----
+        # ---- Embedded option (CALL only, optional) ----
         st.markdown("##### Embedded options")
-        eo1, eo2 = st.columns(2)
-        with eo1:
-            call_price = st.number_input("Call price", value=105.0, step=0.5, format="%.2f", key="cv_call_px")
-            call_start = st.number_input("Callable from (year)", value=3.0, step=0.5, format="%.1f", key="cv_call_from")
-        with eo2:
-            put_price = st.number_input("Put price", value=95.0, step=0.5, format="%.2f", key="cv_put_px")
-            put_start = st.number_input("Puttable from (year)", value=2.0, step=0.5, format="%.1f", key="cv_put_from")
-
-        steps = int(st.slider("Tree steps (binomial)", min_value=50, max_value=400, value=100, step=10, key="cv_steps"))
-        st.caption("Numerical grid: more steps improve accuracy but increase computation time.")
+        call_enabled = st.checkbox("Add issuer call option", value=False, key="cv_call_enable")
+        if call_enabled:
+            eo1, eo2 = st.columns(2)
+            with eo1:
+                call_price = st.number_input("Call price", value=105.0, step=0.5, format="%.2f", key="cv_call_px")
+            with eo2:
+                call_start = st.number_input("Callable from (year)", value=3.0, step=0.5, format="%.1f", key="cv_call_from")
+        else:
+            # Provide defaults (won't be used unless call_enabled True)
+            call_price = 105.0
+            call_start = 3.0
 
     # -------------------
     # Top-Right: Method overview + Examples — Download
@@ -259,32 +252,49 @@ def render():
     with colTR:
         st.subheader("Method overview")
 
+        # -- Explanation for non-experts
         st.markdown(
             """
-            Convertible bonds can be viewed as a straight bond plus an embedded conversion option, with an investor put and an issuer call.
-            Because multiple continuous decisions can occur over time, pricing is path-dependent.
+            **What is a convertible bond?**  
+            A convertible bond is a regular bond (coupons + redemption at par) that also gives the investor a **choice**:
+            keep receiving coupons like a bond, **or** convert the bond into a fixed number of shares (the *conversion ratio*).
+            Some issues also allow the **issuer** to redeem early (a *call*), which can cap the upside if the stock rallies.
+            Because these choices can happen at different dates, we price the instrument by simulating many possible stock paths
+            and solving the investor’s/issuer’s decisions **backward in time**.
             """
         )
 
         st.markdown(
             """
-            **Definitions**
-            - *Issuer call*: the issuer may redeem the bond early at a preset call price.
-            - *Investor put*: the holder may sell the bond back to the issuer at a preset put price.
-            - *Conversion option*: the right for the bondholder to exchange each bond for a predetermined number of the issuer’s shares,
-              according to the conversion ratio. The parity (the current equity value of one bond if converted) equals the current share price (S₀)
-              multiplied by the conversion ratio.
+            **How we price it — step by step**  
+            1) **Build an equity tree (CRR):** at each small time step, the stock can go *up* or *down*.
+               In our model, the stock grows at the risk-free rate *r* minus the dividend yield *q* (dividends leave the stock price).  
+            
+            2) **We value the bond part of the convertible**: the expected future value is discounted at (risk-free + credit spread), and coupons are added on coupon dates.  
+            
+            3) **Conversion & call**: at each step, the investor chooses between holding or converting (value = shares × stock), while the issuer—if allowed—may call the bond (redeem at the call price, which in practice can force investors to convert if the stock is high), limiting the investor’s upside.
+            
+            4) **Roll back to today:** repeating this comparison from maturity to now yields the fair price and the risk metrics.
             """
         )
 
-        st.markdown(
-            """
-            **Approach (binomial)**
-            1) Compute the straight bond leg by discounting coupons and principal at *(risk-free + credit spread)* → bond floor.  
-            2) Price the conversion feature on a Cox–Ross–Rubinstein tree (risk-neutral, with dividend yield if any).  
-            3) At each node, apply the optimal decision: continue, convert, exercise the put, or (if called) settle at the better of conversion vs call price. Backward induction yields today’s price.
-            """
-        )
+        with st.expander("What about the call option?"):
+            st.markdown(
+                """
+                **What is the call in a CB?**  
+                The *issuer call* is the issuer’s right to **redeem early** at a preset call price (sometimes only on specific dates
+                or once the stock trades above a trigger — “soft call”). In practice, if the stock rallies and the convertible becomes
+                very equity-like, the issuer may call to stop paying coupons or to push investors to convert.
+
+                **How is it reflected in pricing?**  
+                On call-eligible dates, after computing the investor’s node value (*max of continue vs convert*), the issuer may override
+                that value by choosing the **cheapest** settlement for itself: either pay the **call price** in cash or **let investors convert**.
+                Mathematically we replace the node value by  
+                \\(\\min\\big(\\text{node value},\\; \\max(\\text{conversion},\\; \\text{call price})\\big)\\).  
+                This *caps the upside* of the convertible when the stock is high, thus **reducing its value** compared with an identical
+                non-callable structure. The effect is small when the bond is **bond-like**, and much larger when it’s **equity-like**.
+                """
+            )
 
         st.markdown("### Examples — Download")
 
@@ -323,9 +333,8 @@ def render():
         face=face, coupon_rate=coupon_rate, freq=int(freq), years_to_maturity=years,
         s0=s0, div_yield=div_y, vol=vol, r=r, credit_spread=spr,
         conv_ratio=conv_ratio,
-        callable=True, call_price=call_price, call_start_year=call_start,
-        putable=True, put_price=put_price, put_start_year=put_start,
-        steps=steps
+        callable=bool(call_enabled), call_price=call_price, call_start_year=call_start,
+        steps=_STEPS_FIXED
     )
 
     price = _binomial_convertible_pricer(spec)
@@ -333,138 +342,15 @@ def render():
     conv_val_now, parity = _parity_and_conv_value(spec)
     delta, gamma = _greek_delta_gamma(spec)
 
+    # Conversion price (strike) derived from face and conversion ratio
+    conversion_price = (spec.face / spec.conv_ratio) if spec.conv_ratio > 0 else float("nan")
+
     # -------------------
-    # Bottom-Left: Chart — Convertible price vs current stock price S₀
+    # Bottom-Left: Chart — placeholder only
     # -------------------
     with colBL:
         st.subheader("Price vs Stock")
-
-        # --- Build pricing curve over a range of S
-        S_min = max(0.05, 0.25 * spec.s0)
-        S_max = 2.25 * spec.s0
-        n_pts = 61
-        S_grid = np.linspace(S_min, S_max, n_pts)
-
-        conv_prices = []
-        for S in S_grid:
-            sp = ConvSpec(**{**spec.__dict__, "s0": float(S)})
-            conv_prices.append(_binomial_convertible_pricer(sp))
-
-        df = pd.DataFrame({
-            "Stock (S)": S_grid,
-            "Convertible price": conv_prices,
-        })
-        df["Parity = S × ratio"] = df["Stock (S)"] * spec.conv_ratio
-        df["Bond floor"] = bond_floor
-
-        # --- Locate break-even where convertible price ≈ parity
-        diff = df["Convertible price"] - df["Parity = S × ratio"]
-        sign = np.sign(diff.values)
-        cross_idx = np.where(np.diff(sign) != 0)[0]
-        be_point = None
-        if cross_idx.size > 0:
-            i = cross_idx[0]
-            # Linear interpolation for the crossing
-            x0, x1 = df["Stock (S)"].iloc[i], df["Stock (S)"].iloc[i + 1]
-            y0, y1 = diff.iloc[i], diff.iloc[i + 1]
-            if (y1 - y0) != 0:
-                s_be = float(x0 - y0 * (x1 - x0) / (y1 - y0))
-                p_be = float(s_be * spec.conv_ratio)  # at break-even price ≈ parity
-                be_point = pd.DataFrame({"Stock (S)": [s_be], "Price": [p_be]})
-
-        # --- Altair chart
-        df_long = df.melt(id_vars=["Stock (S)"], 
-                          value_vars=["Convertible price", "Parity = S × ratio", "Bond floor"],
-                          var_name="Series", value_name="Price")
-
-        dash_map = {
-            "Convertible price": [1, 0],     # solid
-            "Parity = S × ratio": [6, 4],    # dashed
-            "Bond floor": [2, 4],            # dotted
-        }
-        df_long["Dash"] = df_long["Series"].map(dash_map)
-
-        line_main = alt.Chart(df_long).mark_line(strokeWidth=3).encode(
-            x=alt.X("Stock (S):Q", title="Underlying stock price (S)"),
-            y=alt.Y("Price:Q", title="Value (per bond)"),
-            color=alt.Color("Series:N",
-                            scale=alt.Scale(
-                                domain=["Convertible price", "Parity = S × ratio", "Bond floor"],
-                                range=["#2563eb", "#f4d03f", "#94a3b8"]
-                            ),
-                            legend=alt.Legend(title="Legend")),
-            strokeDash="Dash:N",
-            tooltip=[
-                alt.Tooltip("Stock (S):Q", format=",.2f"),
-                alt.Tooltip("Series:N"),
-                alt.Tooltip("Price:Q", format=",.2f"),
-            ]
-        )
-
-        # Vertical marker at current S₀
-        vline = alt.Chart(pd.DataFrame({"Stock (S)": [spec.s0]})).mark_rule(
-            stroke="#111827", strokeWidth=1.5, opacity=0.35
-        ).encode(x="Stock (S):Q")
-
-        vline_label = alt.Chart(pd.DataFrame({"Stock (S)": [spec.s0], "label": ["Current S₀"]})).mark_text(
-            dy=-6, align="right", baseline="bottom", fontSize=11, color="#111827", opacity=0.7
-        ).encode(
-            x="Stock (S):Q",
-            y=alt.value(0),
-            text="label:N"
-        )
-
-        # Horizontal references: call & put prices
-        ref_lines_df = pd.DataFrame({
-            "label": ["Call price", "Put price"],
-            "y": [spec.call_price, spec.put_price],
-            "color": ["#ef4444", "#10b981"]
-        })
-        ref_rules = alt.Chart(ref_lines_df).mark_rule(strokeDash=[3, 4], strokeWidth=1.2).encode(
-            y="y:Q",
-            color=alt.Color("label:N", scale=alt.Scale(domain=["Call price", "Put price"],
-                                                       range=["#ef4444", "#10b981"]),
-                            legend=alt.Legend(title="Thresholds"))
-        )
-        ref_text = alt.Chart(ref_lines_df).mark_text(align="left", dx=6, dy=-4, fontSize=11).encode(
-            y="y:Q",
-            x=alt.value(6),
-            text=alt.Text("label:N"),
-            color=alt.Color("label:N",
-                            scale=alt.Scale(domain=["Call price", "Put price"],
-                                            range=["#ef4444", "#10b981"]))
-        )
-
-        # Break-even point (if any)
-        be_layer = None
-        if be_point is not None:
-            be_dot = alt.Chart(be_point).mark_point(size=90, filled=True, color="#f59e0b").encode(
-                x="Stock (S):Q", y="Price:Q"
-            )
-            be_label = alt.Chart(be_point.assign(label="Break-even (convert)").copy()).mark_text(
-                dy=-12, fontSize=11, color="#92400e"
-            ).encode(x="Stock (S):Q", y="Price:Q", text="label:N")
-            be_layer = be_dot + be_label
-
-        chart = alt.layer(line_main, vline, vline_label, ref_rules, ref_text, *( [be_layer] if be_layer is not None else [] )).properties(
-            height=420
-        ).interactive(bind_y=False)
-
-        st.altair_chart(chart, use_container_width=True)
-
-        # Short explainer under the chart
-        st.markdown(
-            """
-            <div style="font-size:0.95rem; color:#4b5563; line-height:1.35;">
-            <span style="color:#2563eb; font-weight:600;">Convertible price</span> (blue) rises with the stock and is floored by the
-            straight bond value (grey). The <span style="color:#f4d03f; font-weight:600;">parity</span> (yellow, dashed) is the immediate equity
-            value upon conversion (<code>S × ratio</code>). The orange dot marks the break-even where conversion becomes economically indifferent
-            (price ≈ parity). Dashed green/red lines show investor <em>put</em> and issuer <em>call</em> cash settlement references.
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
+        st.info("To be updated.")
 
     # -------------------
     # Bottom-Right: Key metrics (rounded to 2 decimals)
@@ -473,7 +359,7 @@ def render():
         st.subheader("Key metrics")
 
         price_to_par = 100.0 * (price / spec.face)
-        conv_premium = 100.0 * (price / parity - 1.0) if parity > 0 else np.nan
+        conv_premium_pct = 100.0 * (price / parity - 1.0) if parity > 0 else np.nan
 
         def f2(x: float) -> str:
             try:
@@ -485,7 +371,7 @@ def render():
         with left:
             st.metric("Convertible price", f2(price))
             st.metric("Bond floor (no conversion)", f2(bond_floor))
-            st.metric("Parity = S × ratio", f2(parity))
+            st.metric("Conversion price (strike)", f2(conversion_price))
         with right:
             st.metric("Delta (∂Price/∂S)", f2(delta))
             st.metric("Gamma (∂²Price/∂S²)", f2(gamma))
@@ -496,21 +382,27 @@ def render():
                 f"""
                 <div class="subtle-grey" style="font-size:0.95rem;">
                   <div style="font-weight:600; margin-bottom:.15rem;">Convertible price</div>
-                  Tree-based fair value reflecting coupons, conversion, put, and call.
+                  Tree-based fair value reflecting coupons, conversion, and (if enabled) issuer call.
 
                   <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Bond floor</div>
-                  Present value of coupons and principal discounted at <code>r + credit spread</code> (frequency {spec.freq}).
+                  Present value of coupons and principal discounted at <code>r + credit spread</code>.
 
                   <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Parity</div>
                   Immediate conversion value = <code>S₀ × ratio</code>.
 
+                  <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Conversion price (strike)</div>
+                  In a CB, the strike is the <em>conversion price</em> = <code>Face / Conversion ratio</code>.
+                  It sets the equity level at which conversion starts to be attractive:
+                  when the stock price <em>S</em> is <strong>above</strong> the conversion price, the immediate conversion value
+                  (<code>ratio × S</code>) exceeds the bond’s par value (equity-like region); when <em>S</em> is <strong>below</strong>,
+                  the bond behaves more like a straight bond (bond-like region). In practice, coupons, credit, and call features
+                  can shift the exact conversion threshold, but the strike remains the key anchor for “moneyness”.
+
                   <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Delta</div>
-                  Delta measures how much the convertible’s price changes for a small change in the stock price
-                  (first-order equity sensitivity), holding other inputs constant.
+                  First-order sensitivity to the stock price (holding other inputs constant).
 
                   <div style="font-weight:600; margin-top:.6rem; margin-bottom:.15rem;">Gamma</div>
-                  Gamma measures how fast Delta itself changes as the stock price moves (second-order equity convexity).
-                  A higher Gamma means Delta adjusts more rapidly when the stock moves, reflecting stronger curvature of price with respect to S.
+                  Rate of change of Delta as the stock moves (second-order equity convexity).
                 </div>
                 """,
                 unsafe_allow_html=True
