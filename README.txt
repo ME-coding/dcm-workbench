@@ -16,6 +16,6 @@ streamlit run app.py
 déployer une modification : 
 
 git add .
-git commit -m "update 10.09.22h45"
+git commit -m "modification 00:17"
 git push
 streamlit run app.py
