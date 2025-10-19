@@ -202,7 +202,7 @@ A **€500 million 10-year fixed-rate bond** (base coupon **2.625%**) whose **20
             color=alt.Color(
                 "Scenario:N",
                 scale=alt.Scale(domain=domain_order, range=color_range),
-                legend=alt.Legend(title="Scenario"),
+                legend=alt.Legend(title="Scenario", orient="bottom"),
             ),
             tooltip=[
                 alt.Tooltip("Scenario:N"),
