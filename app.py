@@ -2,6 +2,10 @@ import streamlit as st
 import importlib
 from pathlib import Path
 import base64
+import numpy as np
+
+if not hasattr(np, "trapz"):
+    np.trapz = np.trapezoid
 
 # ---------- Page config ----------
 st.set_page_config(
